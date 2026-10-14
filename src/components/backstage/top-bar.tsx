@@ -47,9 +47,11 @@ export function BrandMark({ withText = true }: { withText?: boolean }) {
         aria-hidden
         className="grid size-9 place-items-center rounded-xl bg-[#f2f2f5] text-[#101014] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.8)]"
       >
-        <svg viewBox="0 0 24 24" className="size-4.5" fill="currentColor">
-          <path d="M9.5 7.6v8.8c0 .8.9 1.3 1.6.9l7-4.4c.6-.4.6-1.4 0-1.8l-7-4.4c-.7-.4-1.6.1-1.6.9Z" />
-          <path d="M4 8.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1Z" opacity=".55" />
+        {/* элементы внутри иконки крупнее: плей почти на всю высоту бокса,
+            полоска-«пауза» длиннее — логотип читается даже мелким кеглем */}
+        <svg viewBox="0 0 24 24" className="size-5.5" fill="currentColor">
+          <path d="M8.8 7.2v9.6c0 .9 1 1.45 1.75.95l7.6-4.8c.7-.45.7-1.5 0-1.95l-7.6-4.8c-.75-.5-1.75.05-1.75.95Z" />
+          <path d="M4 7.2c.6 0 1 .45 1 1v7.6c0 .6-.4 1-1 1s-1-.4-1-1V8.2c0-.55.4-1 1-1Z" opacity=".55" />
         </svg>
       </span>
       {withText && (

@@ -8,7 +8,6 @@
 import { useMemo, useState } from "react";
 import {
   ChevronLeft,
-  Heart,
   Share2,
   Star,
 } from "lucide-react";
@@ -20,7 +19,7 @@ import { findCategory } from "@/lib/categories";
 import { ViewersIcon } from "@/components/backstage/icons";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useContent, formatCount, formatWhen } from "@/components/backstage/hooks";
-import { AboutSection, SubscribeDialog, useFollow } from "@/components/backstage/views/live-view";
+import { AboutSection, SubscribeDialog } from "@/components/backstage/views/live-view";
 import { ClipCard } from "@/components/backstage/cards";
 import { toast } from "@/hooks/use-toast";
 import type { ClipDto, ScheduleDto } from "@/lib/types";
@@ -32,7 +31,6 @@ export function ChannelView() {
   const clips = useContent<ClipDto>("clips");
   const schedule = useContent<ScheduleDto>("schedule");
   const [subOpen, setSubOpen] = useState(false);
-  const { followed, toggle } = useFollow(channel?.slug ?? "");
 
   const channelClips = useMemo(
     () => (clips ?? []).filter((c) => c.channelSlug === channel?.slug).slice(0, 6),
@@ -145,7 +143,20 @@ export function ChannelView() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pb-1">
-          {!user?.isSubscriber && user?.role !== "ADMIN" && (
+          {/* Единственная CTA — подписка (фоллоу-кнопки больше нет):
+              подписчик/автор видят активное состояние «ПОДПИСАН» */}
+          {user?.isSubscriber || user?.role === "ADMIN" ? (
+            <Button
+              onClick={() => setSubOpen(true)}
+              variant="secondary"
+              className="glass label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px] text-foreground"
+              title="Платная подписка активна — нажмите для управления"
+              aria-pressed
+            >
+              <Star className="size-3.5 fill-live text-live" aria-hidden />
+              ПОДПИСАН
+            </Button>
+          ) : (
             <Button
               onClick={() => setSubOpen(true)}
               className="btn-gradient glow-primary label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px]"
@@ -154,18 +165,6 @@ export function ChannelView() {
               ПОДПИСАТЬСЯ
             </Button>
           )}
-          <Button
-            onClick={toggle}
-            variant="secondary"
-            className={cn(
-              "label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px]",
-              followed ? "glass text-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-            )}
-            aria-pressed={followed}
-          >
-            <Heart className={cn("size-3.5", followed && "fill-foreground text-foreground")} />
-            {followed ? "ОТСЛЕЖИВАЕТЕ" : "ОТСЛЕЖИВАТЬ"}
-          </Button>
           <Button
             variant="ghost"
             size="icon"

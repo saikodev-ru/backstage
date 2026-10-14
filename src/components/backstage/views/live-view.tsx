@@ -16,7 +16,6 @@ import {
   ChevronUp,
   ChevronsLeft,
   ChevronsRight,
-  Coins,
   Copy,
   Crown,
   ExternalLink,
@@ -161,46 +160,8 @@ function ChatResizeHandle({
   );
 }
 
-/* ── Бесплатная подписка («Отслеживать») — локальный флаг ─────────────── */
-
-export function useFollow(slug: string) {
-  const [followed, setFollowed] = useState(false);
-
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      try {
-        const raw = localStorage.getItem("backstage:follows");
-        const set = new Set<string>(raw ? JSON.parse(raw) : []);
-        setFollowed(set.has(slug));
-      } catch {
-        setFollowed(false);
-      }
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [slug]);
-
-  const toggle = () => {
-    setFollowed((prev) => {
-      const next = !prev;
-      try {
-        const raw = localStorage.getItem("backstage:follows");
-        const set = new Set<string>(raw ? JSON.parse(raw) : []);
-        if (next) set.add(slug);
-        else set.delete(slug);
-        localStorage.setItem("backstage:follows", JSON.stringify([...set]));
-      } catch {
-        /* noop */
-      }
-      toast({
-        title: next ? "Вы отслеживаете канал" : "Отслеживание отключено",
-        description: next ? "Уведомим о старте следующего эфира" : undefined,
-      });
-      return next;
-    });
-  };
-
-  return { followed, toggle };
-}
+/* ── Бесплатная подписка («Отслеживать») убрана: единственная CTA —
+   платная «ПОДПИСАТЬСЯ» (см. кнопки в инфо-баре и на странице канала) ── */
 
 /* ── Диалог платной подписки ────────────────────────────────────── */
 
@@ -659,7 +620,6 @@ export function LiveView() {
   const schedule = useContent<ScheduleDto>("schedule");
   const [mobileChatOpen, setMobileChatOpen] = useState(true);
   const [subOpen, setSubOpen] = useState(false);
-  const { followed, toggle } = useFollow(channel?.slug ?? "");
 
   const chatLayout = useSyncExternalStore(subscribeChatLayout, readChatLayout, chatLayoutServer);
 
@@ -904,7 +864,21 @@ export function LiveView() {
           {/* Справа: компактные кнопки + пилюля зрителей (как в Twitch) */}
           <div className="flex w-full shrink-0 flex-col items-stretch gap-2.5 sm:w-auto sm:items-end">
             <div className="flex flex-wrap items-center gap-2">
-              {!user?.isSubscriber && user?.role !== "ADMIN" && (
+              {/* Единственная CTA — подписка (фоллоу-кнопки больше нет):
+                  гость/без подписки → градиент «ПОДПИСАТЬСЯ» → диалог;
+                  подписчик → активное стекло «ПОДПИСАН» (управление в диалоге) */}
+              {user?.isSubscriber || user?.role === "ADMIN" ? (
+                <Button
+                  onClick={() => setSubOpen(true)}
+                  variant="secondary"
+                  className="glass label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px] text-foreground"
+                  title="Платная подписка активна — нажмите для управления"
+                  aria-pressed
+                >
+                  <Star className="size-3.5 fill-live text-live" aria-hidden />
+                  ПОДПИСАН
+                </Button>
+              ) : (
                 <Button
                   onClick={() => setSubOpen(true)}
                   className="btn-gradient glow-primary label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px]"
@@ -913,31 +887,10 @@ export function LiveView() {
                   ПОДПИСАТЬСЯ
                 </Button>
               )}
-              {user?.isSubscriber && (
-                <span
-                  className="label-caps flex items-center gap-1 rounded-full bg-white/10 px-3 py-1.5 text-[11px] text-foreground/80"
-                  title="Платная подписка активна"
-                >
-                  <Star className="size-3.5 fill-current" aria-hidden />
-                  ПОДПИСКА АКТИВНА
-                </span>
-              )}
-
-              <Button
-                onClick={toggle}
-                variant="secondary"
-                className={cn(
-                  "label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px]",
-                  followed ? "glass text-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                )}
-                aria-pressed={followed}
-              >
-                <Heart className={cn("size-3.5", followed && "fill-foreground text-foreground")} />
-                {followed ? "ОТСЛЕЖИВАЕТЕ" : "ОТСЛЕЖИВАТЬ"}
-              </Button>
 
               {/* Пилюля зрителей: счётчик + «плюс» — копирование ссылки на эфир
-                  (как на YouTube: плюс открывает ссылку с кнопкой «Скопировать») */}
+                  (как на YouTube: плюс открывает ссылку с кнопкой «Скопировать»);
+                  счётчик «дышит» — поп-анимация при каждом изменении (демо-онлайн) */}
               {channel.isLive ? (
                 <div className="flex items-stretch overflow-hidden rounded-full bg-white/[.08]">
                   <span
@@ -945,7 +898,9 @@ export function LiveView() {
                     title="Сейчас смотрят"
                   >
                     <ViewersIcon className="size-4" />
-                    <span className="tabular-nums">{viewCount}</span>
+                    <span key={viewCount} className="viewer-pop inline-block tabular-nums">
+                      {viewCount}
+                    </span>
                   </span>
                   <Popover open={shareOpen} onOpenChange={setShareOpen}>
                     <PopoverTrigger asChild>
@@ -996,7 +951,7 @@ export function LiveView() {
                 className="label-caps flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
               >
                 ПОДДЕРЖАТЬ
-                <Coins className="size-3.5 text-live" aria-hidden />
+                <Heart className="size-3.5 fill-live text-live" aria-hidden />
               </a>
             )}
           </div>

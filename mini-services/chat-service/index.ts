@@ -1246,6 +1246,10 @@ async function cmdDemo(ctx: CmdCtx): Promise<CmdResult | void> {
   if (!demoEnabled) {
     nextDemoAt.clear()
     demoPresence.clear() // демо-зрители исчезают из «кто в чате» сразу
+    demoViewers.clear() // симулированный онлайн сбрасывается
+    demoHype.clear()
+    resetDemoPresence() // чату сразу возвращаем реальный счётчик
+    pushViewersNow() // и витрину тоже — без ожидания 10с-таймера
   }
   emitSystem(ctx.channel, `Демо-чат ${arg === 'on' ? 'включён' : 'выключен'}`)
   broadcastChatters(ctx.channel) // сразу обновляем список «кто в чате»
@@ -1452,9 +1456,12 @@ const DEMO_USERS: Array<{ name: string; color: string }> = [
   { name: 'Тихая_Гря', color: '#fd971f' },
 ]
 
+// Реплики без эмодзи: вместо них — ТОКЕНЫ КАСТОМНЫХ СМОЙЛОВ (7TV/BTTV/FFZ),
+// которые фронтенд и оверлей рендерят картинками; дубли по 2-3 подряд —
+// как настоящий спам смайлами в Twitch.
 const DEMO_TEXTS: string[] = [
   'ГОЙДА НА КВЕСТ',
-  'KEKW она опять сгорела',
+  'LuL она опять сгорела',
   'какая песня?? шазам не берёт',
   'РАСПИСАНИЕ ГДЕ',
   'стрим дня спасён',
@@ -1472,87 +1479,255 @@ const DEMO_TEXTS: string[] = [
   'обожаю этот смайл peepoHappy',
   'первый!!',
   'ложусь спать… шучу смотрю дальше',
-  'PogChamp Clap',
+  'EZ Clap',
   'дайте две',
   'чай заварен, продолжаем',
-  'POGGERS',
+  'Clap Clap Clap',
   'ой всё',
   'вайб непередаваемый',
   'подписка оформлена, я дома',
-  'СОТКА УШЛА, СПАСИБО 💜💜💜',
-  'ЭТО ЖЕ ЛЕГЕНДАРНЫЙ КЛИП 🔥🔥',
-  'пересматриваю 3 раз, всё равно смешно 😂😂😂',
-  'салют в чат ✨✨',
-  'у неё сегодня просто лучшая форма 💪🔥',
-  'смотрю с телефона под одеялом 🛌🌙',
-  'ГОЛОС КАКОЙ 🔥🔥🔥',
-  'котика покажи!! 🐱🐱🐱',
-  'яндекс.драйв продаёт ваш мерч?? 🤔',
-  'звук топ, картинка топ, ведущая топ 🏆',
-  'супер-чатик прочитают?? 👀👀',
-  'где мерч, я готов платить 💳💸',
-  'чаёк с лимоном и стрим 🍵🍋',
-  'лайк поставил, колокол зазвонил 🔔💜',
-  'ДАВАЙ ЕЩЁ РАУНД 😤😤',
-  'мама, я в чате известного стримера 😎',
-  'как всегда шикарно 💜💜',
-  'аплодирую стоя 👏👏👏',
-  'ВОТ ЭТО УРОВЕНЬ 🎩🍿',
-  'чат живее всех живых ⚡⚡',
-  'неужели победим?? 🙏🙏🙏',
-  'С ДНЁМ РОЖДЕНИЯ ЧАТ 🎂🎉🎉',
-  'печеньки передаю 🍪🍪',
-  'уже 2 часа смотрю, как летит время ⏰💫',
-  'эй, кто выключил свет… а, это сцена 🌑😅',
-  'прошу аниме-опенинг в караоке 🎤🔥',
-  'забойный вайб, залип на весь вечер',
-  'сосед стучит — говорит громко смеюсь 😂',
-  'у меня мурашки 🥶❤️',
-  'ЧТО ПРОИСХОДИТ, Я НЕ ПОНИМАЮ 😱😱',
-  'ловлю минуты кайфа ☕✨',
-  'ПОРА ДЕЛАТЬ КЛИПЫ 🎬🎬',
-  'эта катка войдёт в историю 📜🔥',
-  'подписался на все соцсети сразу 📲💜',
-  'зубрю теорию и смотрю стрим — идеальный вечер 📚🍵',
-  'ЧАТ, ПОДДЕРЖИМ АПЛОДИСМЕНТАМИ 👏👏👏',
-  'я тут новенький, приветики 👋👋',
-  'ОНА СДЕЛАЛА ЭТО 🏆🏆🏆',
-  'у меня финал завтра, но стрим важнее 📖😅',
-  'летсплей-интенсивность просто зашкаливает ⚡⚡',
-  'кийф, кайф и восхитительное слово «кулак» 🥊',
-  'стакан воды не забывай, ведущая! 💧🥤',
-  'давайте соберём сто лайков 💯✨',
-  'финальный босс дрожит 😈🔥',
-  'этот момент — в топ чата 🚀',
-  'лучший вечер недели 🌃💜',
-  'МОЛОДЦА, ЧАТ ПРАВИЛЬНЫЙ 🫡🫡',
-  'обожаю когда план срабатывает 🧠✅',
-  'танцую на кухне 💃🕺',
-  'звёзды сошлись, стрим ровно в этот вечер ✨🌙',
-  'у меня чат-зависимость 😅💊',
-  'спасибо за настроение на всю неделю 🌈',
-  'КТО ПОСТАВИЛ ГЛОБАЛЬНЫЙ ТУРБО-РЕКОРД 🏁⚡',
-  'стрим безупречен, как всегда 👌👌',
-  'стрим — терапия 🧘‍♀️💆',
-  'ВОТ ТАКАЯ ФИНАЛЬНАЯ СЕРИЯ 🎬🏆',
+  'СОТКА УШЛА, СПАСИБО AYAYA AYAYA AYAYA',
+  'ЭТО ЖЕ ЛЕГЕНДАРНЫЙ КЛИП Clap Clap',
+  'пересматриваю 3 раз, всё равно смешно LuL LuL LuL',
+  'салют в чат peepoHappy peepoHappy',
+  'у неё сегодня просто лучшая форма FeelsStrongMan',
+  'смотрю с телефона под одеялом peepoSad',
+  'ГОЛОС КАКОЙ gachiGASM gachiGASM gachiGASM',
+  'котика покажи!! PETPET PETPET',
+  'яндекс.драйв продаёт ваш мерч?? WatChuSay',
+  'звук топ, картинка топ, ведущая топ Clap',
+  'супер-чатик прочитают?? monkaS monkaS',
+  'где мерч, я готов платить',
+  'чаёк с лимоном и стрим TeaTime',
+  'лайк поставил, колокол зазвонил',
+  'ДАВАЙ ЕЩЁ РАУНД FeelsStrongMan FeelsStrongMan',
+  'мама, я в чате известного стримера BasedGod',
+  'как всегда шикарно peepoHappy peepoHappy',
+  'аплодирую стоя Clap Clap Clap',
+  'ВОТ ЭТО УРОВЕНЬ BibleThump',
+  'чат живее всех живых ffzHyper ffzHyper',
+  'неужели победим?? BibleThump BibleThump BibleThump',
+  'С ДНЁМ РОЖДЕНИЯ ЧАТ PartyParrot PartyParrot PartyParrot',
+  'печеньки передаю CatBag CatBag',
+  'уже 2 часа смотрю, как летит время',
+  'эй, кто выключил свет… а, это сцена monkaS',
+  'прошу аниме-опенинг в караоке gachiGASM',
+  'забойный вайб, залип на весь вечер ffzJam',
+  'сосед стучит — говорит громко смеюсь LuL',
+  'у меня мурашки gachiGASM',
+  'ЧТО ПРОИСХОДИТ, Я НЕ ПОНИМАЮ monkaS monkaS monkaS',
+  'ловлю минуты кайфа TeaTime',
+  'ПОРА ДЕЛАТЬ КЛИПЫ',
+  'эта катка войдёт в историю Clap Clap',
+  'подписался на все соцсети сразу',
+  'зубрю теорию и смотрю стрим — идеальный вечер',
+  'ЧАТ, ПОДДЕРЖИМ АПЛОДИСМЕНТАМИ Clap Clap Clap',
+  'я тут новенький, приветики peepoHappy peepoHappy',
+  'ОНА СДЕЛАЛА ЭТО EZ Clap EZ',
+  'у меня финал завтра, но стрим важнее FeelsBadMan',
+  'летсплей-интенсивность просто зашкаливает ffzHyper',
+  'кийф, кайф и восхитительное слово «кулак»',
+  'стакан воды не забывай, ведущая!',
+  'давайте соберём сто лайков',
+  'финальный босс дрожит monkaS',
+  'этот момент — в топ чата',
+  'лучший вечер недели',
+  'МОЛОДЦА, ЧАТ ПРАВИЛЬНЫЙ Clap Clap',
+  'обожаю когда план срабатывает BasedGod',
+  'танцую на кухне PartyParrot PartyParrot',
+  'звёзды сошлись, стрим ровно в этот вечер',
+  'у меня чат-зависимость xdx',
+  'спасибо за настроение на всю неделю peepoHappy',
+  'КТО ПОСТАВИЛ ГЛОБАЛЬНЫЙ ТУРБО-РЕКОРД ffzBounce',
+  'стрим безупречен, как всегда Wowee Wowee',
+  'стрим — терапия',
+  'ВОТ ТАКАЯ ФИНАЛЬНАЯ СЕРИЯ BibleThump BibleThump',
+  // ── волна 2: чистый смайл-спам (по 2-3 одинаковых) ──
+  'AYAYA AYAYA AYAYA',
+  'LuL LuL LuL',
+  'haHAA haHAA haHAA',
+  'peepoHappy peepoHappy peepoHappy',
+  'monkaS monkaS',
+  'Clap Clap Clap',
+  'EZ Clap EZ Clap',
+  'FeelsGoodMan FeelsGoodMan',
+  'FeelsStrongMan FeelsStrongMan FeelsStrongMan',
+  'BibleThump BibleThump BibleThump',
+  'forsenPls forsenPls forsenPls',
+  'PartyParrot PartyParrot PartyParrot',
+  'SourPls SourPls SourPls',
+  'ffzJam ffzJam',
+  'ffzHyper ffzHyper ffzHyper',
+  'gachiGASM gachiGASM',
+  'Stare Stare Stare',
+  'xdx xdx xdx',
+  'glorp glorp glorp',
+  'PETPET PETPET',
+  'D: D: D:',
+  'peepoSad peepoSad',
+  'KKona KKona',
+  'NaM NaM NaM',
+  'WAYTOODANK WAYTOODANK',
+  'VapeNation VapeNation',
+  'GabeN GabeN GabeN',
+  'YooHoo YooHoo',
+  'Wowee Wowee Wowee',
+  'CatBag CatBag CatBag',
+  'AlienDance AlienDance AlienDance',
+  'Hhhehehe Hhhehehe',
+  'aceStare aceStare aceStare',
+  'bttvNice bttvNice',
+  'PepePls PepePls PepePls',
+  'ffzSpin ffzSpin',
+  'ffzRainbow ffzRainbow ffzRainbow',
+  'RareParrot RareParrot',
+  'ForeverAlone ForeverAlone ForeverAlone',
+  'DogChamp DogChamp',
+  'ShoopDaWhoop ShoopDaWhoop ShoopDaWhoop',
+  'cvHazmat cvHazmat cvHazmat',
+  'ApuApustaja ApuApustaja',
+  'ConcernDoge ConcernDoge ConcernDoge',
+  'xdx LuL xdx',
+  'AYAYA Clap AYAYA',
+  'monkaS FeelsWeirdMan monkaS',
+  'LuL AYAYA LuL',
+  'peepoHappy peepoPls peepoHappy',
+  'gachiBASS gachiGASM gachiBASS',
+  'Clap BasedGod Clap',
+  'Stare monkaS Stare',
+  'haHAA LuL haHAA',
+  // ── волна 3: живые реплики с смайлами-токенами ──
+  'AYAYA AYAYA она снова это сделала',
+  'LuL чат, я не могу LuL LuL',
+  'monkaS монка, у меня руки трясутся monkaS',
+  'Clap Clap Clap виват ведущей',
+  'это было чисто EZ',
+  'FeelsWeirdMan стрим без неё не тот FeelsWeirdMan',
+  'peepoHappy я готов к двухчасовому марафону',
+  'haHAA шутка уровня чата haHAA',
+  'BibleThump прощай, рейтинг BibleThump',
+  'AYAYA аригато за эфир AYAYA AYAYA',
+  'ffzJam врубайте этот трек на репит ffzJam',
+  'gachiGASM какой голос gachiGASM',
+  'Stare она сейчас без эмоций это сказала Stare',
+  'monkaS не заходи туда monkaS monkaS',
+  'Clap спасибо модам за порядок Clap',
+  'LuL перекат с двумя хп LuL LuL LuL',
+  'peepoSad я всё пропустил peepoSad',
+  'xdx шалость удалась xdx xdx',
+  'PartyParrot весь чат танцует PartyParrot PartyParrot',
+  'танцы начинаются SourPls SourPls',
+  'forsenPls тот самый момент forsenPls forsenPls',
+  'PetThePeepo PETPET гладим PETPET',
+  'D: что. это. было. D: D:',
+  'KKona где моя ковбойская шляпа KKona',
+  'NaM язык жестов уровня чата NaM',
+  'GabeN три GabeN GabeN GabeN и оффлайн',
+  'VapeNation затянулся вайбом VapeNation',
+  'Wowee ясно,понятно Wowee Wowee',
+  'CatBag кота в студию CatBag CatBag',
+  'Hhhehehe смешно до слёз Hhhehehe Hhhehehe',
+  'bttvNice чисто bttvNice',
+  'cvHazmat чат, соблюдайте дистанцию cvHazmat',
+  'ForeverAlone один — не один ForeverAlone',
+  'ShoopDaWhoop заряжаю ШУП ShoopDaWhoop',
+  'peepoPls умоляю, сделай клип peepoPls peepoPls',
+  'ffzSpin голова кругом ffzSpin ffzSpin',
+  'RareParrot редкий гость RareParrot RareParrot',
+  'аAAAAAAAA она свернула AYAYA AYAYA',
+  'по классике заходим LuL',
+  'через пень колоду, но прошли LuL',
+  'статистика на нуле FeelsBadMan FeelsBadMan',
+  'чайник уже кипит TeaTime TeaTime',
+  'субтитры сломались WatChuSay WatChuSay',
+  'громче микрофон, соседи не слышат VapeNation',
+  'мама спросила, почему я смеюсь LuL LuL',
+  'карту подсказывай, чат добрый Stare',
+  'поставь на паузу, чай наливается TeaTime',
+  'клавиатура топ, слышно прекрасно Clap Clap',
+  'рой ватрушек на экране ffzBounce ffzBounce',
+  'аплодисменты в чате Clap Clap Clap Clap',
+  'у меня подписка на всё BasedGod BasedGod',
+  'сон отменился, смотрим дальше ffzHyper',
+  'суперсонная реакция EZ Clap',
+  'лучший монтаж — живой PepePls',
+  'хочу этот фрагмент в клип gachiGASM',
+  'танцпол открыт PartyParrot PartyParrot PartyParrot',
+  'прошу без спойлеров monkaS monkaS monkaS',
+  'что за трек?? AYAYA скажи',
+  'настроение чата: ffzHyper ffzHyper ffzHyper',
+  'мурашки от этого момента gachiGASM gachiGASM',
+  'чат, не забываем водичку peepoHappy',
+  'у кого сколько хп? monkaS',
+  'стрим-марафон продолжается FeelsStrongMan',
+  'пицца заказана, продолжаем TeaTime',
+  'уровень прокачан EZ',
+  'записываю рецепт победы PepePls PepePls',
+  'дайте две пиццы PartyParrot',
+  'последний круг, чат верит Clap Clap',
+  'мой смайл — мой характер AYAYA',
+  'чай остывает, эфир греет TeaTime TeaTime',
+  'коллективный разум активирован BasedGod BasedGod',
 ]
 
 const DEMO_USERS_BY_NAME = new Map(DEMO_USERS.map((u) => [u.name, u] as const))
 
 const nextDemoAt = new Map<string, number>() // channelSlug -> next demo message ts
-const DEMO_MIN_GAP = 7000
-const DEMO_MAX_GAP = 14_000
 
+// ── «Хайп»-волны: чат то спокойный, то взрывается ─────────────────────
+// level ∈ [0..1]: 0 — «тихая» фаза (репко раз в ~15с), 1 — «злая»
+// (сообщения почти подряд + бёрсты). Цель (target) меняется раз в 25-70с,
+// уровень медленно тянется к ней — живой пульс чата как в Twitch.
+const DEMO_GAP_CALM = 15_000 // пауза при level → 0
+const DEMO_GAP_HYPE = 1_100 // пауза при level → 1
+const DEMO_BURST_LEVEL = 0.6 // с какого уровня начинаются бёрсты 2-4 подряд
+type DemoHype = { level: number; target: number; retargetAt: number }
+const demoHype = new Map<string, DemoHype>()
+
+function hypeOf(slug: string): DemoHype {
+  let h = demoHype.get(slug)
+  if (!h) {
+    h = {
+      level: 0.12 + Math.random() * 0.25,
+      target: 0.35 + Math.random() * 0.55,
+      retargetAt: Date.now() + 20_000 + Math.floor(Math.random() * 40_000),
+    }
+    demoHype.set(slug, h)
+  }
+  return h
+}
+
+/** Шаг эволюции хайпа: тянем level к target, target периодически меняем. */
+function stepHype(slug: string): void {
+  const h = hypeOf(slug)
+  if (Date.now() >= h.retargetAt) {
+    // новая цель: чаще около середины, иногда — «пожар» или «полная тишина»
+    const roll = Math.random()
+    h.target = roll < 0.18 ? 0.05 + Math.random() * 0.15 : roll > 0.82 ? 0.75 + Math.random() * 0.25 : 0.3 + Math.random() * 0.4
+    h.retargetAt = Date.now() + 25_000 + Math.floor(Math.random() * 45_000)
+  }
+  const step = 0.015 + Math.random() * 0.05
+  h.level += h.target > h.level ? step : -step
+  h.level = Math.min(1, Math.max(0, h.level))
+}
+
+/** Пауза до следующего сообщения с учётом текущего уровня хайпа. */
+function demoGapMs(level: number): number {
+  const base = DEMO_GAP_CALM - level * (DEMO_GAP_CALM - DEMO_GAP_HYPE)
+  return Math.max(600, Math.round(base * (0.75 + Math.random() * 0.5)))
+}
 /** Редкие реплики демо-модераторов — их бейдж 'mod' виден в чате. */
 const DEMO_MOD_TEXTS: string[] = [
-  'чат, не спамим 🌿',
+  'чат, не спамим Clap',
   'культурно, пожалуйста',
   'вопросы — в !команды, там всё есть',
   'напоминаю: !эмоции — список смайлов',
-  'мут не выношу, но капс прикручу 😌',
+  'мут не выношу, но капс прикручу Stare',
   'следим за вайбом, всем добра',
-  'ссылки только в личку, правила есть правила 📌',
-  'эмодзи-спам по чуть-чуть, ладно? 😊',
+  'ссылки только в личку, правила есть правила',
+  'смайл-спам по чуть-чуть, ладно? peepoSad',
+  'по темпу не отставаем ffzHyper',
+  'прошу без капса, ведущая всё слышит monkaS',
 ]
 
 function pick<T>(list: T[]): T {
@@ -1599,7 +1774,9 @@ function emitDemoMessage(slug: string, forced?: { user: { name: string; color: s
   }
 }
 
-// демо-чат: раз в 1.5с проверяем, не пора ли подсунуть сообщение
+// демо-чат: раз в 1.5с проверяем, не пора ли подсунуть сообщение.
+// Интенсивность динамическая: «хайп» каждого канала живёт своей волной
+// (тихие фазы ~15с между репликами → бешеные с бёрстами по 2-4 подряд).
 // (таймер ставится через startDemoTimer — см. ensureBackground ниже)
 function startDemoTimer(): void {
   setInterval(() => {
@@ -1610,14 +1787,28 @@ function startDemoTimer(): void {
       if (!name.startsWith('ch:')) continue // skip per-socket rooms
       if (members.size === 0) continue
       const slug = name.slice(3)
+      stepHype(slug)
       const at = nextDemoAt.get(slug)
       if (at === undefined) {
         nextDemoAt.set(slug, now + 2000 + Math.floor(Math.random() * 5000))
         continue
       }
       if (now < at) continue
-      nextDemoAt.set(slug, now + DEMO_MIN_GAP + Math.floor(Math.random() * (DEMO_MAX_GAP - DEMO_MIN_GAP)))
+      const level = hypeOf(slug).level
+      nextDemoAt.set(slug, now + demoGapMs(level))
       emitDemoMessage(slug, maybeModMessage(slug))
+      // бёрст: при высоком хайпе реплики летят очередью 2-4 подряд
+      if (level >= DEMO_BURST_LEVEL && Math.random() < 0.45) {
+        const extra = 1 + Math.floor(Math.random() * 3)
+        for (let i = 1; i <= extra; i++) {
+          setTimeout(() => {
+            if (!demoEnabled) return
+            const r = io.sockets.adapter.rooms.get(roomKey(slug))
+            if (!r || r.size === 0) return
+            emitDemoMessage(slug)
+          }, Math.round(i * (500 + Math.random() * 800)))
+        }
+      }
     }
   }, 1500)
 }
@@ -1750,6 +1941,64 @@ function startChattersTimer(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Демо-онлайн: «скачущий» счётчик зрителей (random-walk вокруг базы).
+// Реальные сокеты + симулированные зрители: чат-шапка и пилюля зрителей
+// на витрине дышат (±единицы), иногда прыгают — как живой эфир в Twitch.
+// ---------------------------------------------------------------------------
+
+const DEMO_VIEWERS_DRIFT_MS = 4_000 // период дрейфа счётчика
+const demoViewers = new Map<string, { base: number; v: number }>() // slug -> симулируемый онлайн
+
+function demoViewersCount(slug: string): number {
+  const s = demoViewers.get(slug)
+  return s ? Math.max(0, Math.round(s.v)) : 0
+}
+
+/** Один шаг дрейфа: ±единицы, изредка прыжок; держимся в коридоре базы. */
+function driftDemoViewers(slug: string): void {
+  let s = demoViewers.get(slug)
+  if (!s) {
+    const base = 47 + (hashName(slug) % 130) // 47..176 — «якорь» канала
+    s = { base, v: base + (Math.random() * 10 - 5) }
+    demoViewers.set(slug, s)
+  }
+  let v = s.v + (Math.random() * 7 - 3.5)
+  if (Math.random() < 0.07) v += Math.random() < 0.5 ? -(6 + Math.random() * 14) : 6 + Math.random() * 14
+  s.v = Math.min(s.base * 1.3, Math.max(s.base * 0.72, v))
+}
+
+/** Счётчик присутствия канала: реальные сокеты + демо-онлайн (если демо вкл.). */
+function presenceCount(slug: string): number {
+  const real = roomCount(slug)
+  return demoEnabled ? real + demoViewersCount(slug) : real
+}
+
+/** Дрейф + рассылка presence:update по активным комнатам (~4с). */
+function startDemoViewersTimer(): void {
+  setInterval(() => {
+    if (!demoEnabled) return
+    for (const [room, members] of io.sockets.adapter.rooms) {
+      const name = String(room)
+      if (!name.startsWith('ch:')) continue // skip per-socket rooms
+      if (members.size === 0) continue
+      const slug = name.slice(3)
+      driftDemoViewers(slug)
+      io.in(roomKey(slug)).emit('presence:update', { channelSlug: slug, count: presenceCount(slug) })
+    }
+  }, DEMO_VIEWERS_DRIFT_MS)
+}
+
+/** Немедленно восстановить реальный онлайн после выключения демо. */
+function resetDemoPresence(): void {
+  for (const [room] of io.sockets.adapter.rooms) {
+    const name = String(room)
+    if (!name.startsWith('ch:')) continue // skip per-socket rooms
+    const slug = name.slice(3)
+    io.in(roomKey(slug)).emit('presence:update', { channelSlug: slug, count: roomCount(slug) })
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Socket.io connection handling
 // ---------------------------------------------------------------------------
 
@@ -1777,7 +2026,7 @@ io.on('connection', (socket) => {
     if (previous && previous !== channelSlug) {
       socket.leave(roomKey(previous))
       socket.data.channel = null
-      io.in(roomKey(previous)).emit('presence:update', { channelSlug: previous, count: roomCount(previous) })
+      io.in(roomKey(previous)).emit('presence:update', { channelSlug: previous, count: presenceCount(previous) })
       broadcastChatters(previous) // обновляем «кто в чате» для покинутой комнаты
     }
     socket.join(roomKey(channelSlug))
@@ -1786,7 +2035,7 @@ io.on('connection', (socket) => {
     // v2.2: вошедшему сразу отдаём текущее закреплённое сообщение канала (если есть)
     const pin = pins.get(channelSlug)
     if (pin) socket.emit('chat:pin', { channelSlug, message: pin.message, until: pin.until })
-    io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
+    io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: presenceCount(channelSlug) })
     broadcastChatters(channelSlug) // сразу присылаем «кто в чате» вошедшему
   })
 
@@ -1795,7 +2044,7 @@ io.on('connection', (socket) => {
     if (typeof channelSlug !== 'string' || channelSlug.length === 0) return
     if (socket.data.channel === channelSlug) socket.data.channel = null
     socket.leave(roomKey(channelSlug))
-    io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
+    io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: presenceCount(channelSlug) })
     broadcastChatters(channelSlug)
   })
 
@@ -1845,28 +2094,33 @@ io.on('connection', (socket) => {
 
 // ---------------------------------------------------------------------------
 // Viewer counts reporting (every 10s, fire-and-forget)
+// С демо-чатом в отчёт включается симулируемый онлайн — тогда пилюля
+// зрителей на витрине «скачет» (дрейф из driftDemoViewers).
 // ---------------------------------------------------------------------------
 
+function pushViewersNow(): void {
+  const counts: Record<string, number> = {}
+  for (const [room, members] of io.sockets.adapter.rooms) {
+    const name = String(room)
+    if (!name.startsWith('ch:')) continue // skip per-socket rooms
+    const slug = name.slice(3)
+    counts[slug] = demoEnabled ? members.size + demoViewersCount(slug) : members.size
+  }
+  // include 0 for previously-known slugs so the main app can reset them
+  for (const slug of lastReportedViewers.keys()) {
+    if (!(slug in counts)) counts[slug] = 0
+  }
+  const anyPositive = Object.values(counts).some((n) => n > 0)
+  const needsReset = [...lastReportedViewers.entries()].some(
+    ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0,
+  )
+  if (!anyPositive && !needsReset) return
+  for (const [slug, n] of Object.entries(counts)) lastReportedViewers.set(slug, n)
+  postJson(`${MAIN_APP_BASE}/api/internal/viewers`, { counts }, 'viewers')
+}
+
 function startViewersTimer(): void {
-  setInterval(() => {
-    const counts: Record<string, number> = {}
-    for (const [room, members] of io.sockets.adapter.rooms) {
-      const name = String(room)
-      if (!name.startsWith('ch:')) continue // skip per-socket rooms
-      counts[name.slice(3)] = members.size
-    }
-    // include 0 for previously-known slugs so the main app can reset them
-    for (const slug of lastReportedViewers.keys()) {
-      if (!(slug in counts)) counts[slug] = 0
-    }
-    const anyPositive = Object.values(counts).some((n) => n > 0)
-    const needsReset = [...lastReportedViewers.entries()].some(
-      ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0,
-    )
-    if (!anyPositive && !needsReset) return
-    for (const [slug, n] of Object.entries(counts)) lastReportedViewers.set(slug, n)
-    postJson(`${MAIN_APP_BASE}/api/internal/viewers`, { counts }, 'viewers')
-  }, VIEWERS_INTERVAL_MS)
+  setInterval(pushViewersNow, VIEWERS_INTERVAL_MS)
 }
 
 // ---------------------------------------------------------------------------
@@ -1916,6 +2170,7 @@ function ensureBackground(): void {
   startDemoTimer()
   startChattersTimer()
   startViewersTimer()
+  startDemoViewersTimer()
   startMaintenanceTimers()
   startPinTtlTimer()
 }

@@ -175,7 +175,8 @@ export function VideoPlayer({
       // размытие при отрисовке (дешёво: свёртка на 256×144); Safari без
       // ctx.filter просто рисует без размытия — ореол чуть резче, но жив
       try {
-        ctx.filter = "blur(9px) saturate(1.55) brightness(1.12)";
+        // blur поднят до 14px — свечение мягче, «лампы», а не «неон»
+        ctx.filter = "blur(14px) saturate(1.6) brightness(1.08)";
         ctx.drawImage(video, 0, 0, AMBIENT_W, AMBIENT_H);
         ctx.filter = "none";
       } catch {
@@ -228,22 +229,22 @@ export function VideoPlayer({
       const dw = rect.width * sx;
       const dh = rect.height * sy;
       try {
-        wctx.filter = "blur(6px) saturate(1.4) brightness(1.18)";
+        wctx.filter = "blur(10px) saturate(1.35) brightness(1.12)";
         wctx.drawImage(video, dx, dy, dw, dh);
-        // второй, широкий слой — мягкий полусвет вокруг плеера
+        // второй, широкий слой — полусвет вокруг плеера (компактнее и мягче)
         const cx = dx + dw / 2;
         const cy = dy + dh / 2;
-        wctx.globalAlpha = 0.45;
-        wctx.drawImage(video, cx - dw * 0.95, cy - dh * 0.95, dw * 1.9, dh * 1.9);
+        wctx.globalAlpha = 0.38;
+        wctx.drawImage(video, cx - dw * 0.78, cy - dh * 0.78, dw * 1.56, dh * 1.56);
         wctx.globalAlpha = 1;
         wctx.filter = "none";
         // радиальное затухание: плато у плеера → прозрачно у краёв вьюпорта
         const r = Math.hypot(Math.max(cx, WASH_W - cx), Math.max(cy, WASH_H - cy));
         if (r > 1) {
           wctx.globalCompositeOperation = "destination-in";
-          const g = wctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
+          const g = wctx.createRadialGradient(cx, cy, r * 0.28, cx, cy, r);
           g.addColorStop(0, "rgba(0,0,0,1)");
-          g.addColorStop(0.62, "rgba(0,0,0,0.6)");
+          g.addColorStop(0.6, "rgba(0,0,0,0.55)");
           g.addColorStop(1, "rgba(0,0,0,0)");
           wctx.fillStyle = g;
           wctx.fillRect(0, 0, WASH_W, WASH_H);
@@ -537,7 +538,7 @@ export function VideoPlayer({
             width={WASH_W}
             height={WASH_H}
             aria-hidden
-            className="pointer-events-none fixed inset-0 z-[-1] block h-full w-full opacity-55"
+            className="pointer-events-none fixed inset-0 z-[-1] block h-full w-full opacity-50"
           />,
           document.body
         )}
@@ -550,7 +551,7 @@ export function VideoPlayer({
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute -top-12 -bottom-32 -left-12 -right-24 -z-10",
+          "pointer-events-none absolute -top-8 -bottom-24 -left-8 -right-16 -z-10",
           !ambientActive && "hidden"
         )}
       >
@@ -558,7 +559,7 @@ export function VideoPlayer({
           ref={ambientRef}
           width={AMBIENT_W}
           height={AMBIENT_H}
-          className="block h-full w-full opacity-80"
+          className="block h-full w-full opacity-75"
         />
       </div>
 

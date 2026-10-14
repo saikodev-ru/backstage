@@ -211,18 +211,20 @@
   -webkit-backdrop-filter: blur(20px);
 }
 /* Полупрозрачные structural-панели (сайдбар, чат, инфо-бар): чуть темнее
-   фона, сильный blur — эмбиент просачивается мягким «комнатным» светом */
+   фона, сильный blur — эмбиент просачивается мягким «комнатным» светом.
+   Прозрачность — «слегка прозрачнее топбара» (топбар bg-background/70):
+   панели держат 0.64/0.60 — читаемо, но стекло живое */
 .glass-panel {
-  background: rgba(11, 11, 13, 0.55);
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  background: rgba(11, 11, 13, 0.64);
+  backdrop-filter: blur(28px) saturate(1.3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3);
 }
 /* вариант с оконтовкой (для «плавающих» панелей над эмбиентом) */
 .glass-panel-bordered {
-  background: rgba(11, 11, 13, 0.5);
+  background: rgba(11, 11, 13, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(24px) saturate(1.3);
-  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  backdrop-filter: blur(28px) saturate(1.3);
+  -webkit-backdrop-filter: blur(28px) saturate(1.3);
 }
 
 /* ── Читаемость текста чата поверх яркого эмбиента ─────────────────────
@@ -404,6 +406,19 @@
 }
 .ticker:hover .ticker-track {
   animation-play-state: paused;
+}
+
+/* пилюля зрителей: «поп» при смене счётчика (скачущий онлайн) */
+@keyframes viewer-pop {
+  0% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.viewer-pop {
+  animation: viewer-pop 0.45s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 /* чат: маска сверху */

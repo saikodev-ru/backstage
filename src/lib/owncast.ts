@@ -116,7 +116,10 @@ export async function mergeChannelWithOwncast(channel: PublicChannel): Promise<P
     isLive: state.online,
     // HLS идёт через наш прокси; для канала с личным инстансом — с ?ch=slug
     hlsUrl: channel.owncastBaseUrl ? `${HLS_PROXY_MASTER}?ch=${channel.slug}` : HLS_PROXY_MASTER,
-    viewers: state.viewerCount ?? channel.viewers,
+    // зрители = максимум из движка (HLS-сессии) и счётчика чат-присутствия:
+    // с включённым демо-чатом чат-сервис репортит «скачущий» онлайн в БД —
+    // он важнее голого числа HLS-сессий (плеер + оверлеи + демо)
+    viewers: Math.max(state.viewerCount ?? 0, channel.viewers),
     liveStartedAt: state.online ? state.lastConnectTime : null,
     liveTitle: channel.liveTitle || state.streamTitle || null,
   };

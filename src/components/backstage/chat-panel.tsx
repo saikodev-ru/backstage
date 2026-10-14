@@ -455,6 +455,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   const user = useBackstageStore((s) => s.user);
   const setAuthOpen = useBackstageStore((s) => s.setAuthOpen);
   const channel = useBackstageStore((s) => s.channels.find((c) => c.slug === channelSlug));
+  const patchChannel = useBackstageStore((s) => s.patchChannel);
 
   const [messages, setMessages] = useState<ChatMessageDto[]>([]);
   const [viewers, setViewers] = useState<number>(channel?.viewers ?? 0);
@@ -570,7 +571,10 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
     });
 
     socket.on("presence:update", (data: { channelSlug: string; count: number }) => {
-      if (data.channelSlug === channelSlug) setViewers(data.count);
+      if (data.channelSlug !== channelSlug) return;
+      setViewers(data.count);
+      // пилюля зрителей под плеером «дышит» вместе с чатом (дрейф демо-онлайна)
+      if (data.count > 0) patchChannel(channelSlug, { viewers: data.count });
     });
 
     // «Кто в чате»: живой список от чат-сервиса
@@ -601,7 +605,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       setConnected(false);
       setMessages([]);
     };
-  }, [token, channelSlug, scrollToBottom]);
+  }, [token, channelSlug, scrollToBottom, patchChannel]);
 
   // ── Стартовый список «кто в чате» (REST, до первого события сокета) ────
   useEffect(() => {
