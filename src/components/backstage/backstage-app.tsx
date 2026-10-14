@@ -109,8 +109,10 @@ function Shell() {
   const liveChannel = channels.find((c) => c.isLive);
   const showTicker = Boolean(liveChannel && view !== "live");
 
+  // NB: bg у обёртки НЕ ставим (он на body) — иначе wash-канвас эмбиента
+  // (fixed, z:-1 в body) оказался бы под ним и не светился бы сквозь панели.
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
+    <div className="flex min-h-screen flex-col text-foreground">
       <TopBar />
       {showTicker && liveChannel && <LiveTicker channel={liveChannel} />}
       <div className="flex flex-1">

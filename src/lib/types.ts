@@ -29,6 +29,8 @@ export type PublicChannel = {
   bannerUrl: string | null;
   accentColor: string;
   telegramLink: string | null;
+  /** Ссылка на поддержку (донаты) — кнопка «ПОДДЕРЖАТЬ» под эфиром */
+  donateLink?: string | null;
   /** Доступ к эфиру: публичный или приватный (гейт по платной подписке) */
   access: "public" | "private";
   /** Telegram-канал, который должен быть в подписках зрителя (private-эфиры) */

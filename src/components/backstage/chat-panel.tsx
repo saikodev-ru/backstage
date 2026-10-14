@@ -699,7 +699,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
               </button>
             )}
           </div>
-          <p className={cn("mt-1 truncate", TEXT_SIZE_CLASS[chatSettings.textSize])}>
+          <p className={cn("chat-shadow mt-1 truncate", TEXT_SIZE_CLASS[chatSettings.textSize])}>
             <span className="font-bold" style={{ color: pinned.message.color }}>
               {pinned.message.name}
             </span>
@@ -738,7 +738,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
               /* ПКМ-меню модерации (только для модов) */
               <ContextMenu key={m.id}>
                 <ContextMenuTrigger asChild>
-                  <div className="fade-up break-words px-2 py-[3px] transition-colors hover:bg-white/[.06]">
+                  <div className="chat-shadow fade-up break-words px-2 py-[3px] transition-colors hover:bg-white/[.06]">
                     <MessageBody m={m} emotes={emoteMap} showTimestamp={chatSettings.timestamps} />
                   </div>
                 </ContextMenuTrigger>
@@ -788,7 +788,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
                 </ContextMenuContent>
               </ContextMenu>
             ) : (
-              <div key={m.id} className="fade-up break-words px-2 py-[3px] transition-colors hover:bg-white/[.06]">
+              <div key={m.id} className="chat-shadow fade-up break-words px-2 py-[3px] transition-colors hover:bg-white/[.06]">
                 <MessageBody m={m} emotes={emoteMap} showTimestamp={chatSettings.timestamps} />
               </div>
             )

@@ -16,6 +16,7 @@ type ChannelRow = {
   accentColor: string;
   telegramChatId: string | null;
   telegramLink: string | null;
+  donateLink: string | null;
   access: string;
   requiredTelegramChatId: string | null;
   isLive: boolean;
@@ -53,6 +54,7 @@ export function mapChannel(c: ChannelRow, isAdmin: boolean): PublicChannel {
     bannerUrl: c.bannerUrl,
     accentColor: c.accentColor,
     telegramLink: c.telegramLink,
+    donateLink: c.donateLink,
     access: c.access === "public" ? "public" : "private",
     requiredTelegramChatId: c.requiredTelegramChatId ?? null,
     isLive: c.isLive,

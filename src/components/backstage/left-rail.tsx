@@ -317,7 +317,7 @@ export function LeftRail() {
         role="navigation"
         aria-label="Основная навигация"
         className={cn(
-          "sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 transition-[width] duration-200 ease-out lg:flex",
+          "glass-panel sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 transition-[width] duration-200 ease-out lg:flex",
           compact ? "w-[72px]" : "w-[264px]",
         )}
       >

@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
     avatarUrl?: string;
     telegramChatId?: string;
     telegramLink?: string;
+    donateLink?: string;
     accentColor?: string;
     hlsUrl?: string;
   };
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
       avatarUrl: body.avatarUrl ?? null,
       telegramChatId: body.telegramChatId ?? null,
       telegramLink: body.telegramLink ?? null,
+      donateLink: body.donateLink?.slice(0, 300) ?? null,
       accentColor: body.accentColor ?? "#a970ff",
       hlsUrl: body.hlsUrl ?? null,
       sortOrder: (max?.sortOrder ?? 0) + 1,

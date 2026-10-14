@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   Check,
+  Coins,
   Copy,
   Eye,
   EyeOff,
@@ -164,6 +165,8 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
   const [tagline, setTagline] = useState(channel.tagline ?? "");
   const [avatarUrl, setAvatarUrl] = useState(channel.avatarUrl ?? "");
   const [bannerUrl, setBannerUrl] = useState(channel.bannerUrl ?? "");
+  // Ссылка на поддержку (донаты) — кнопка «ПОДДЕРЖАТЬ» под эфиром
+  const [donateLink, setDonateLink] = useState(channel.donateLink ?? "");
   // Категория хранится как slug; легаси-значения (напр. «Just Chatting»)
   // нормализуются к современному slug — иначе плитки не подсветятся.
   const [category, setCategory] = useState(
@@ -186,6 +189,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
     if (field === "tagline") setTagline(value.slice(0, 80));
     if (field === "avatarUrl") setAvatarUrl(value.slice(0, 500));
     if (field === "bannerUrl") setBannerUrl(value.slice(0, 500));
+    if (field === "donateLink") setDonateLink(value.slice(0, 300));
   };
 
   const save = async () => {
@@ -204,6 +208,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           avatarUrl: avatarUrl.trim() || null,
           bannerUrl: bannerUrl.trim() || null,
           liveCategory: category || null,
+          donateLink: donateLink.trim() || null,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { channel?: PublicChannel; message?: string };
@@ -216,6 +221,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           avatarUrl: data.channel.avatarUrl,
           bannerUrl: data.channel.bannerUrl,
           liveCategory: data.channel.liveCategory,
+          donateLink: data.channel.donateLink,
         });
       }
       setDirty(false);
@@ -316,6 +322,23 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
               </div>
               <CropUploadButton target={CROP_BANNER} onUploaded={(url) => patch("bannerUrl", url)} />
             </div>
+          </Field>
+
+          <Field label="ССЫЛКА ПОДДЕРЖКИ (ДОНАТЫ)" hint="кнопка «ПОДДЕРЖАТЬ» под эфиром">
+            <div className="relative">
+              <Coins className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={donateLink}
+                onChange={(e) => patch("donateLink", e.target.value)}
+                className="pl-9"
+                placeholder="https://boosty.to/…"
+                inputMode="url"
+                maxLength={300}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground/70">
+              Зрители увидят кликабельную строку «ПОДДЕРЖАТЬ» под кнопками эфира. Оставьте пустым, чтобы скрыть.
+            </p>
           </Field>
 
           <div className="flex justify-end">

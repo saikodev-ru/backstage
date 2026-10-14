@@ -16,6 +16,8 @@ import {
   ChevronUp,
   ChevronsLeft,
   ChevronsRight,
+  Coins,
+  Copy,
   Crown,
   ExternalLink,
   Heart,
@@ -24,7 +26,6 @@ import {
   MessageSquare,
   Pencil,
   Plus,
-  Share2,
   Star,
   Trash2,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -661,6 +663,27 @@ export function LiveView() {
 
   const chatLayout = useSyncExternalStore(subscribeChatLayout, readChatLayout, chatLayoutServer);
 
+  // Ссылка шаринга (SSR-безопасно: window только на клиенте)
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}${window.location.pathname}#ch-${channel?.slug ?? ""}`);
+  }, [channel?.slug]);
+
+  const copyShare = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      toast({ title: "Ссылка скопирована", description: `backstage · ${channel.name}` });
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast({ title: "Не удалось скопировать ссылку", variant: "destructive" });
+    }
+  };
+
   const nextStream = useMemo(
     () =>
       schedule
@@ -687,16 +710,6 @@ export function LiveView() {
   const subLink = channel.telegramLink ?? "https://t.me";
   const category = findCategory(channel.liveCategory);
   const viewCount = formatCount(Math.max(channel.viewers, 1));
-
-  const share = async () => {
-    const url = `${window.location.origin}${window.location.pathname}#ch-${channel.slug}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast({ title: "Ссылка скопирована", description: `backstage · ${channel.name}` });
-    } catch {
-      toast({ title: "Не удалось скопировать ссылку", variant: "destructive" });
-    }
-  };
 
   // overflow-x-clip: эмбиент-ореол плеера выходит за его края — без обрезки
   // на мобильных он распирал страницу по горизонтали. clip (не hidden) не
@@ -806,9 +819,9 @@ export function LiveView() {
           </div>
         )}
 
-        {/* ── Инфо-бар в стиле Twitch (без фона и контуров) ──
-            z-10: печатается ПОВЕРХ эмбиент-свечения плеера, но текст остаётся читаемым */}
-        <div className="fade-up relative z-10 flex flex-wrap items-start gap-x-4 gap-y-3 px-3 pb-5 pt-4 sm:px-4">
+        {/* ── Инфо-бар в стиле Twitch: полупрозрачная glass-панель поверх
+            эмбиент-свечения (wash-канвас светит позади) ── */}
+        <div className="fade-up glass-panel-bordered relative z-10 mx-2 mt-3 flex flex-wrap items-start gap-x-4 gap-y-3 rounded-2xl p-4 sm:mx-4">
           {/* Аватар: толстое кольцо (live — красное) + плашка LIVE в стиле Twitch:
               плашка перекрывает нижнюю дугу кольца БЕЗ зазоров (ширина/высота
               рассчитаны так, чтобы верхний край плашки был выше дуги в её краях).
@@ -888,8 +901,8 @@ export function LiveView() {
             </div>
           </div>
 
-          {/* Справа: компактные кнопки подписок + зрители */}
-          <div className="flex w-full shrink-0 flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+          {/* Справа: компактные кнопки + пилюля зрителей (как в Twitch) */}
+          <div className="flex w-full shrink-0 flex-col items-stretch gap-2.5 sm:w-auto sm:items-end">
             <div className="flex flex-wrap items-center gap-2">
               {!user?.isSubscriber && user?.role !== "ADMIN" && (
                 <Button
@@ -923,27 +936,69 @@ export function LiveView() {
                 {followed ? "ОТСЛЕЖИВАЕТЕ" : "ОТСЛЕЖИВАТЬ"}
               </Button>
 
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Поделиться"
-                className="rounded-full text-muted-foreground hover:bg-white/5 hover:text-foreground"
-                onClick={() => void share()}
-              >
-                <Share2 className="size-4" />
-              </Button>
-            </div>
-
-            <div className="flex items-center gap-1.5 text-[13px]">
+              {/* Пилюля зрителей: счётчик + «плюс» — копирование ссылки на эфир
+                  (как на YouTube: плюс открывает ссылку с кнопкой «Скопировать») */}
               {channel.isLive ? (
-                <>
-                  <ViewersIcon className="size-4 text-live" />
-                  <span className="font-bold tabular-nums text-live">{viewCount}</span>
-                </>
+                <div className="flex items-stretch overflow-hidden rounded-full bg-white/[.08]">
+                  <span
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-bold text-live"
+                    title="Сейчас смотрят"
+                  >
+                    <ViewersIcon className="size-4" />
+                    <span className="tabular-nums">{viewCount}</span>
+                  </span>
+                  <Popover open={shareOpen} onOpenChange={setShareOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="Поделиться ссылкой на эфир"
+                        title="Скопировать ссылку на эфир"
+                        className="grid w-8 place-items-center border-l border-white/10 text-foreground/80 transition-colors hover:bg-white/10 hover:text-foreground"
+                      >
+                        <Plus className="size-4" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align="end"
+                      className="glass-strong w-[min(22rem,calc(100vw-2rem))] rounded-xl p-3"
+                    >
+                      <p className="label-caps text-[11px] text-muted-foreground">ПОДЕЛИТЬСЯ ЭФИРОМ</p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-white/[.06] px-3 py-2 font-mono text-[12px] text-foreground/90">
+                          {shareUrl}
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => void copyShare()}
+                          className="label-caps h-9 shrink-0 gap-1.5 rounded-lg px-3 text-[11px]"
+                        >
+                          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+                          {copied ? "ГОТОВО" : "КОПИР."}
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
               ) : (
-                <span className="label-caps text-[11px] text-muted-foreground">ОФЛАЙН</span>
+                <span className="label-caps flex items-center rounded-full bg-white/[.06] px-3.5 py-1.5 text-[11px] text-muted-foreground">
+                  ОФЛАЙН
+                </span>
               )}
             </div>
+
+            {/* Поддержать канал: ссылка из настроек канала (donateLink) */}
+            {channel.donateLink && (
+              <a
+                href={channel.donateLink}
+                target="_blank"
+                rel="noreferrer noopener"
+                title="Поддержать канал"
+                className="label-caps flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+              >
+                ПОДДЕРЖАТЬ
+                <Coins className="size-3.5 text-live" aria-hidden />
+              </a>
+            )}
           </div>
         </div>
 
@@ -954,10 +1009,11 @@ export function LiveView() {
         </div>
       </div>
 
-      {/* ── Чат: справа от md (drag-resize + сворачивание) ── */}
+      {/* ── Чат: справа от md (drag-resize + сворачивание), glass-панель —
+          сквозь неё светит эмбиент-свечение ── */}
       {chatLayout.open ? (
         <aside
-          className="relative hidden shrink-0 border-l border-white/5 md:sticky md:top-16 md:flex md:h-[calc(100vh-4rem)] md:flex-col"
+          className="glass-panel relative hidden shrink-0 border-l border-white/5 md:sticky md:top-16 md:flex md:h-[calc(100vh-4rem)] md:flex-col"
           style={{ width: chatLayout.w }}
           aria-label="Чат трансляции"
         >
@@ -1008,7 +1064,12 @@ export function LiveView() {
             {mobileChatOpen ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
           </span>
         </button>
-        {mobileChatOpen && <ChatPanel channelSlug={channel.slug} className="mt-2 h-[62vh] min-h-80" />}
+        {mobileChatOpen && (
+          <ChatPanel
+            channelSlug={channel.slug}
+            className="glass-panel-bordered mt-2 h-[62vh] min-h-80 overflow-hidden rounded-2xl"
+          />
+        )}
       </div>
 
       {/* Диалог платной подписки */}

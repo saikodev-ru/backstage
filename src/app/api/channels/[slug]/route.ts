@@ -52,6 +52,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     bannerUrl?: string | null;
     telegramChatId?: string | null;
     telegramLink?: string | null;
+    donateLink?: string | null;
     accentColor?: string;
     followers?: number;
     resetStreamKey?: boolean;
@@ -94,6 +95,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   if (body.bannerUrl !== undefined) data.bannerUrl = body.bannerUrl || null;
   if (body.telegramChatId !== undefined) data.telegramChatId = body.telegramChatId || null;
   if (body.telegramLink !== undefined) data.telegramLink = body.telegramLink || null;
+  if (body.donateLink !== undefined) data.donateLink = body.donateLink.slice(0, 300) || null;
   if (body.accentColor !== undefined) data.accentColor = body.accentColor.slice(0, 9);
   if (typeof body.followers === "number") data.followers = Math.max(0, Math.floor(body.followers));
   if (body.resetStreamKey) data.streamKey = undefined; // cuid() через update ниже
