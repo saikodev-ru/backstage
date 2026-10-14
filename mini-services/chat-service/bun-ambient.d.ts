@@ -32,6 +32,27 @@ declare global {
     /** Directory of the current module (bun builtin). */
     readonly dir: string
   }
+
+  namespace Bun {
+    interface SpawnOptions {
+      cwd?: string
+      env?: Record<string, string | undefined>
+      stdin?: 'ignore' | 'inherit' | 'pipe'
+      stdout?: 'ignore' | 'inherit' | 'pipe'
+      stderr?: 'ignore' | 'inherit' | 'pipe'
+    }
+    interface Subprocess {
+      readonly pid: number | undefined
+      exited: Promise<number>
+      kill(signal?: number | string): void
+    }
+    function spawn(command: string[], options?: SpawnOptions): Subprocess
+  }
+
+  /** Global bun runtime object (частичное объявление используемых API). */
+  var Bun: {
+    spawn: typeof Bun.spawn
+  }
 }
 
 export {}

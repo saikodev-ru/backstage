@@ -1,0 +1,10 @@
+{
+  "name": "backstage-dev-keeper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Смотритель Next.js dev-сервера: держит :3000 поднятым (поднимается chat-сервисом и start.sh)",
+  "scripts": {
+    "dev": "bun index.ts",
+    "start": "bun index.ts"
+  }
+}
