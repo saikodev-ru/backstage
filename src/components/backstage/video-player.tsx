@@ -1,8 +1,10 @@
 "use client";
 
-// HLS-плеер «Бэкстейдж» v3 «ГРАФИТ»: кастомные контролы в стиле Twitch.
+// HLS-плеер «Бэкстейдж» v4 «ГРАФИТ»: кастомные контролы в стиле Twitch.
 // - громкость: нативный range со стилем .player-volume (не обрезается)
 // - качество: «Источник (1080p60) / 720p60 / 480p / 360p / Авто» (уровни HLS)
+// - эмбиент-свечение: размытый ореол кадров видео вокруг плеера — светится
+//   сквозь полупрозрачные (glass) панели интерфейса; выключается в шестерёнке
 // - кнопка «Клип» (заглушка — тост)
 // Воспроизведение: hls.js (MSE) + нативный HLS для Safari.
 
@@ -17,6 +19,7 @@ import {
   Play,
   Scissors,
   Settings,
+  Sparkles,
   Volume1,
   Volume2,
   VolumeX,
@@ -35,6 +38,15 @@ import { Thumb } from "@/components/backstage/cards";
 import { toast } from "@/hooks/use-toast";
 
 type Quality = { index: number; label: string; short: string };
+
+/** Ключ localStorage для эмбиент-свечения («0» = выключено, по умолчанию вкл.) */
+const AMBIENT_KEY = "backstage:ambient";
+
+/** Буфер эмбиент-канваса: 192×108 — растягивается CSS без фильтров.
+ *  Размытие и затухание к краям ЗАПЕКАЮТСЯ в битмапу при отрисовке —
+ *  никакого CSS blur/mask на большом элементе (это убивало софтверный рендер). */
+const AMBIENT_W = 192;
+const AMBIENT_H = 108;
 
 type FpsLadder = { byHeight: Map<number, number>; sourceFps: number };
 
@@ -88,6 +100,7 @@ export function VideoPlayer({
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const ambientRef = useRef<HTMLCanvasElement>(null);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -98,6 +111,97 @@ export function VideoPlayer({
   const [isLive, setIsLive] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "no-source">("loading");
   const [uptime, setUptime] = useState<string | null>(null);
+  // Эмбиент-свечение (persist; по умолчанию включено — как в Twitch)
+  const [ambient, setAmbient] = useState(true);
+
+  // ── Эмбиент: восстановление настройки ─────────────────────────────────
+  useEffect(() => {
+    try {
+      setAmbient(window.localStorage.getItem(AMBIENT_KEY) !== "0");
+    } catch {
+      /* приватный режим — живём с дефолтом */
+    }
+  }, []);
+
+  const toggleAmbient = useCallback(() => {
+    setAmbient((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(AMBIENT_KEY, next ? "1" : "0");
+      } catch {
+        /* noop */
+      }
+      return next;
+    });
+  }, []);
+
+  // ── Эмбиент: рисуем кадры в маленький канвас (~2.5 раза в секунду).
+  // Размытие (ctx.filter) и радиальное затухание к краям запекаются прямо
+  // в битмапу 192×108 — канвас растягивается CSS без единого фильтра,
+  // поэтому ореол почти бесплатен даже для софтверного рендера и светится
+  // сквозь полупрозрачные панели (glass/backdrop-blur).
+  // HLS у нас приходит через тот же домен (прокси /api/stream/hls) —
+  // канвас не «портится», для нативного Safari-HLS ореол тоже работает.
+  const ambientActive = ambient && !locked && Boolean(src) && status === "ready";
+  useEffect(() => {
+    if (!ambientActive) return;
+    const video = videoRef.current;
+    const canvas = ambientRef.current;
+    if (!video || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    let stopped = false;
+    let timer = 0;
+    const draw = () => {
+      if (video.readyState < 2) return;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.clearRect(0, 0, AMBIENT_W, AMBIENT_H);
+      // размытие при отрисовке (дешёво: свёртка на 192×108); Safari без
+      // ctx.filter просто рисует без размытия — ореол чуть резче, но жив
+      try {
+        ctx.filter = "blur(5px) saturate(1.35)";
+        ctx.drawImage(video, 0, 0, AMBIENT_W, AMBIENT_H);
+        ctx.filter = "none";
+      } catch {
+        ctx.drawImage(video, 0, 0, AMBIENT_W, AMBIENT_H);
+      }
+      // запекаем затухание к краям: «плато» под плеером + линейный спад
+      // в полях (вместо CSS mask). Два последовательных destination-in
+      // (горизонталь × вертикаль) дают прямоугольное плато с мягкими краями.
+      ctx.globalCompositeOperation = "destination-in";
+      // горизонталь: поля ~40px слева / ~64px справа в долях ширины бокса
+      const gx = ctx.createLinearGradient(0, 0, AMBIENT_W, 0);
+      gx.addColorStop(0, "rgba(0,0,0,0)");
+      gx.addColorStop(0.05, "rgba(0,0,0,1)");
+      gx.addColorStop(0.94, "rgba(0,0,0,1)");
+      gx.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gx;
+      ctx.fillRect(0, 0, AMBIENT_W, AMBIENT_H);
+      // вертикаль: поле ~40px сверху / ~96px снизу в долях высоты бокса
+      const gy = ctx.createLinearGradient(0, 0, 0, AMBIENT_H);
+      gy.addColorStop(0, "rgba(0,0,0,0)");
+      gy.addColorStop(0.06, "rgba(0,0,0,1)");
+      gy.addColorStop(0.86, "rgba(0,0,0,1)");
+      gy.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = gy;
+      ctx.fillRect(0, 0, AMBIENT_W, AMBIENT_H);
+      ctx.globalCompositeOperation = "source-over";
+    };
+    const tick = () => {
+      if (stopped) return;
+      try {
+        draw();
+      } catch {
+        /* кросс-доменное видео (нативный Safari) — ореол просто не рисуем */
+      }
+      timer = window.setTimeout(tick, 400);
+    };
+    tick();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [ambientActive, src]);
 
   // ── Живой таймер эфира (H:MM:SS, тикает каждую секунду) ───────────────
   useEffect(() => {
@@ -315,16 +419,39 @@ export function VideoPlayer({
     currentQuality === -1 ? "АВТО" : (qualities.find((q) => q.index === currentQuality)?.short ?? "");
 
   return (
-    <div
-      ref={wrapRef}
-      tabIndex={0}
-      role="region"
-      aria-label="Видеоплеер трансляции"
-      className={cn(
-        "group/player relative aspect-video w-full overflow-hidden bg-black outline-none",
-        fullscreen ? "aspect-auto h-full rounded-none" : "rounded-none"
-      )}
-    >
+    <div className="relative isolate">
+      {/* Эмбиент-свечение: размытый ореол текущего кадра ЗА плеером.
+          Выходит за края плеера (сверху/слева/справа/снизу) и подсвечивает
+          полупрозрачные панели интерфейса. -z-10 внутри isolate — всегда
+          позади видео, но поверх фона страницы. NB: канвас — replaced-элемент
+          и НЕ растягивается четырьмя inset-ами, поэтому растяжку делает
+          обёртка-div (h-full w-full), а фильтры запечены в битмапу. В
+          фулскрин не попадает: полноэкранное тело — сам плеер. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -top-10 -bottom-24 -left-10 -right-16 -z-10",
+          !ambientActive && "hidden"
+        )}
+      >
+        <canvas
+          ref={ambientRef}
+          width={AMBIENT_W}
+          height={AMBIENT_H}
+          className="block h-full w-full opacity-70"
+        />
+      </div>
+
+      <div
+        ref={wrapRef}
+        tabIndex={0}
+        role="region"
+        aria-label="Видеоплеер трансляции"
+        className={cn(
+          "group/player relative aspect-video w-full overflow-hidden bg-black outline-none",
+          fullscreen ? "aspect-auto h-full rounded-none" : "rounded-none"
+        )}
+      >
       {/* Постер для гостей / без источника */}
       {(locked || status === "no-source") && (
         <div className="absolute inset-0" aria-hidden={!locked}>
@@ -487,37 +614,52 @@ export function VideoPlayer({
                 <Scissors className="size-5" />
               </button>
 
-              {/* Качество */}
-              {qualities.length > 1 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      aria-label="Настройки качества"
-                      className="grid size-9 place-items-center rounded-full text-white transition-colors hover:bg-white/15"
-                    >
-                      <Settings className="size-5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="glass-strong min-w-44 rounded-xl">
-                    <DropdownMenuLabel className="label-caps text-[11px]">КАЧЕСТВО</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setQuality(-1)} className="gap-2">
-                      <Check className={cn("size-3.5", currentQuality === -1 ? "opacity-100" : "opacity-0")} />
-                      <span className={cn(currentQuality === -1 && "font-bold text-foreground")}>Авто</span>
-                    </DropdownMenuItem>
-                    {qualities.map((q) => (
-                      <DropdownMenuItem key={q.index} onClick={() => setQuality(q.index)} className="gap-2">
-                        <Check
-                          className={cn("size-3.5", currentQuality === q.index ? "opacity-100" : "opacity-0")}
-                        />
-                        <span className={cn(currentQuality === q.index && "font-bold text-foreground")}>
-                          {q.label}
-                        </span>
+              {/* Настройки плеера (гайка, как в Twitch): качество + эмбиент.
+                  Меню доступно всегда, даже когда уровень качества один. */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label="Настройки плеера"
+                    title="Настройки плеера"
+                    className="grid size-9 place-items-center rounded-full text-white transition-colors hover:bg-white/15"
+                  >
+                    <Settings className="size-5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="glass-strong min-w-48 rounded-xl">
+                  {qualities.length > 1 && (
+                    <>
+                      <DropdownMenuLabel className="label-caps text-[11px]">КАЧЕСТВО</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setQuality(-1)} className="gap-2">
+                        <Check className={cn("size-3.5", currentQuality === -1 ? "opacity-100" : "opacity-0")} />
+                        <span className={cn(currentQuality === -1 && "font-bold text-foreground")}>Авто</span>
                       </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+                      {qualities.map((q) => (
+                        <DropdownMenuItem key={q.index} onClick={() => setQuality(q.index)} className="gap-2">
+                          <Check
+                            className={cn("size-3.5", currentQuality === q.index ? "opacity-100" : "opacity-0")}
+                          />
+                          <span className={cn(currentQuality === q.index && "font-bold text-foreground")}>
+                            {q.label}
+                          </span>
+                        </DropdownMenuItem>
+                      ))}
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  <DropdownMenuItem
+                    onClick={toggleAmbient}
+                    className="gap-2"
+                    aria-pressed={ambient}
+                    title="Размытый ореол кадра вокруг плеера — светится сквозь полупрозрачные панели"
+                  >
+                    <Sparkles className="size-3.5 shrink-0" />
+                    <span className={cn(ambient && "font-bold text-foreground")}>Эмбиент-свечение</span>
+                    <Check className={cn("ml-auto size-3.5", ambient ? "opacity-100" : "opacity-0")} />
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               <button
                 onClick={toggleFullscreen}
@@ -530,6 +672,7 @@ export function VideoPlayer({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

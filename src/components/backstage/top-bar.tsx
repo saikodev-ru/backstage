@@ -362,6 +362,11 @@ export function TopBar() {
   const { logout, verifySubscription } = useAuthActions();
 
   const liveChannel = channels.find((c) => c.isLive);
+  // Автор и есть канал: в углу профиля показываем аватар СВОЕГО канала
+  // (а не фото Telegram-аккаунта) — как «лицо» автора на платформе.
+  const myChannel = user?.role === "ADMIN" ? channels[0] : undefined;
+  const profileAvatar = myChannel?.avatarUrl ?? user?.photoUrl ?? undefined;
+  const profileAlt = myChannel?.name ?? user?.firstName;
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/5 bg-background/70 backdrop-blur-2xl">
@@ -434,12 +439,13 @@ export function TopBar() {
               <DropdownMenuTrigger asChild>
                 <button
                   aria-label="Профиль"
+                  title={myChannel ? `Канал ${myChannel.name}` : "Профиль"}
                   className="ml-1 rounded-full ring-2 ring-transparent transition-all hover:ring-primary/60 focus-visible:outline-none focus-visible:ring-primary"
                 >
                   <Avatar className="size-9 rounded-full">
-                    <AvatarImage src={user.photoUrl ?? undefined} alt={user.firstName} />
+                    <AvatarImage src={profileAvatar} alt={profileAlt} />
                     <AvatarFallback className="rounded-full bg-primary/20 text-sm font-semibold text-primary">
-                      {user.firstName.slice(0, 1).toUpperCase()}
+                      {(profileAlt ?? "?").slice(0, 1).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                 </button>

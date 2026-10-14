@@ -8,7 +8,6 @@
 import { useMemo, useState } from "react";
 import {
   ChevronLeft,
-  Eye,
   Heart,
   Share2,
   Star,
@@ -18,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { ViewersIcon } from "@/components/backstage/icons";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useContent, formatCount, formatWhen } from "@/components/backstage/hooks";
 import { AboutSection, SubscribeDialog, useFollow } from "@/components/backstage/views/live-view";
@@ -100,7 +100,7 @@ export function ChannelView() {
         <div className="relative -mt-10 shrink-0 self-end sm:-mt-14">
           <span
             className={cn(
-              "block rounded-full p-1",
+              "grid place-items-center rounded-full p-1",
               channel.isLive ? "bg-live" : "bg-white/25"
             )}
           >
@@ -113,8 +113,9 @@ export function ChannelView() {
           </span>
           {channel.isLive && (
             <span
-              className="live-breathe label-caps absolute bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-px text-[9px] leading-tight text-white"
+              className="label-caps absolute bottom-0 left-1/2 h-4 w-14 -translate-x-1/2 rounded-[5px] text-center text-[10px] font-bold leading-4 tracking-[0.1em] text-white"
               style={{ backgroundColor: "#eb0400" }}
+              title="В эфире"
             >
               LIVE
             </span>
@@ -129,7 +130,7 @@ export function ChannelView() {
               <>
                 {" · "}
                 <span className="inline-flex items-center gap-1 font-bold text-live">
-                  <Eye className="size-3.5" aria-hidden />
+                  <ViewersIcon className="size-3.5" />
                   {formatCount(Math.max(channel.viewers, 1))} смотрят
                 </span>
               </>
@@ -186,7 +187,7 @@ export function ChannelView() {
             aria-label={`Смотреть эфир: ${channel.liveTitle ?? channel.name}`}
           >
             <span className="btn-gradient glow-primary label-caps grid size-11 shrink-0 place-items-center rounded-full text-[11px] text-white group-hover:scale-105">
-              <Eye className="size-5" aria-hidden />
+              <ViewersIcon className="size-5" />
             </span>
             <span className="min-w-0 flex-1">
               <span className="label-caps flex items-center gap-1.5 text-[10px] text-live">
@@ -204,7 +205,7 @@ export function ChannelView() {
                   </span>
                 )}
                 <span className="inline-flex items-center gap-1 font-bold text-live">
-                  <Eye className="size-3.5" aria-hidden />
+                  <ViewersIcon className="size-3.5" />
                   {formatCount(Math.max(channel.viewers, 1))}
                 </span>
               </span>

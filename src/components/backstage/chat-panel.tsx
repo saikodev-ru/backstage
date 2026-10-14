@@ -9,20 +9,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { io, type Socket } from "socket.io-client";
 import {
-  Camera,
   Gem,
   Lock,
   Pin,
   Settings,
-  ShieldCheck,
   SmilePlus,
   Star,
+  Sword,
   Users,
-  Eye,
   Send,
+  Video,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { ViewersIcon } from "@/components/backstage/icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -147,13 +147,16 @@ async function fetchChatJson<T>(path: string): Promise<T | null> {
   }
 }
 
-// ── Бейджи ролей (Twitch-тип: цветная плашка + белая иконка) ────────────
+// ── Бейджи ролей (1:1 Twitch): цветная плашка + белая пиктограмма ──────
+// Иконки и цвета повторяют Twitch: владелец — камера, мод — меч,
+// VIP — бриллиант, подписчик — звезда. Размер привязан к кеглю шрифта
+// (Twitch масштабирует бейджи вместе с размером текста чата).
 
 const BADGE_META: Record<string, { label: string; className: string; Icon: LucideIcon }> = {
-  owner: { label: "Владелец канала", className: "bg-[#eb0400]", Icon: Camera },
-  mod: { label: "Модератор", className: "bg-[#00a870]", Icon: ShieldCheck },
-  vip: { label: "VIP", className: "bg-[#ff77b0]", Icon: Gem },
-  sub: { label: "Платный подписчик", className: "bg-[#a970ff]", Icon: Star },
+  owner: { label: "Владелец канала", className: "bg-[#e91916]", Icon: Video },
+  mod: { label: "Модератор", className: "bg-[#00ad03]", Icon: Sword },
+  vip: { label: "VIP", className: "bg-[#e005b9]", Icon: Gem },
+  sub: { label: "Платный подписчик", className: "bg-[#8205b9]", Icon: Star },
 };
 
 function BadgeChip({ badge, className }: { badge: string; className?: string }) {
@@ -165,12 +168,12 @@ function BadgeChip({ badge, className }: { badge: string; className?: string }) 
       aria-label={meta.label}
       title={meta.label}
       className={cn(
-        "inline-grid h-4 w-4 shrink-0 place-items-center rounded-[4px] align-[-3px]",
+        "inline-grid h-[1.25em] w-[1.25em] shrink-0 place-items-center rounded-[3px] align-[-0.22em]",
         meta.className,
         className
       )}
     >
-      <meta.Icon className="size-2.5 text-white" aria-hidden />
+      <meta.Icon className="size-[0.72em] text-white" strokeWidth={2.6} aria-hidden />
     </span>
   );
 }
@@ -672,7 +675,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
             chattersOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground"
           )}
         >
-          <Eye className="size-4" aria-hidden />
+          <ViewersIcon className="size-4" />
           {chatters.length > 0 ? chatters.length : viewers}
         </button>
       </header>

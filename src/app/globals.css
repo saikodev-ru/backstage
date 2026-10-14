@@ -137,20 +137,25 @@
   /*
    * ФИКС «прыжка страницы» при открытии меню/диалогов (Radix → react-remove-scroll
    * прячет скроллбар через overflow:hidden на body и добавляет padding-right
-   * компенсации). Двойная защита:
+   * компенсации). Тройная защита:
    *   1) html { overflow-y: scroll } — полоса прокрутки есть ВСЕГДА,
    *      поэтому body overflow:hidden больше не распространяется на вьюпорт
    *      (CSS Overflow: распространение работает только при visible у корня);
-   *   2) body { padding-right: 0 !important } — гасит компенсацию remove-scroll,
+   *   2) html { scrollbar-gutter: stable } — браузер резервирует желоб под
+   *      полосу прокрутки у корня: ширина контента не меняется, даже если
+   *      какой-нибудь оверлей всё же тронет прокрутку;
+   *   3) body { padding-right: 0 !important } — гасит компенсацию remove-scroll,
    *      которая при постоянно видимой полосе сама вызывает сдвиг контента.
    * Итог: скроллбар не пропадает, ширина страницы не меняется.
    */
   html {
     overflow-y: scroll;
+    scrollbar-gutter: stable;
   }
   body {
     @apply bg-background text-foreground;
     padding-right: 0 !important;
+    margin-right: 0 !important;
   }
   ::selection {
     background: rgba(244, 244, 246, 0.22);

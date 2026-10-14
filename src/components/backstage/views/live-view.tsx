@@ -18,7 +18,6 @@ import {
   ChevronsRight,
   Crown,
   ExternalLink,
-  Eye,
   Heart,
   Image as ImageIcon,
   Lock,
@@ -45,6 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { ViewersIcon } from "@/components/backstage/icons";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useAuthActions, useContent, formatCount } from "@/components/backstage/hooks";
 import { VideoPlayer } from "@/components/backstage/video-player";
@@ -698,8 +698,11 @@ export function LiveView() {
     }
   };
 
+  // overflow-x-clip: эмбиент-ореол плеера выходит за его края — без обрезки
+  // на мобильных он распирал страницу по горизонтали. clip (не hidden) не
+  // создаёт скролл-контейнер — sticky-чат продолжает работать.
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col md:flex-row">
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col overflow-x-clip md:flex-row">
       {/* Левая часть: плеер вплотную к краям + инфо + «О канале» */}
       <div className="min-w-0 flex-1">
         {/* ── Плеер (edge-to-edge, без контуров и скруглений) ── */}
@@ -803,11 +806,14 @@ export function LiveView() {
           </div>
         )}
 
-        {/* ── Инфо-бар в стиле Twitch (без фона и контуров) ── */}
-        <div className="fade-up flex flex-wrap items-start gap-x-4 gap-y-3 px-3 pb-5 pt-4 sm:px-4">
-          {/* Аватар: толстое кольцо (live — красное) + плашка LIVE под кольцом.
+        {/* ── Инфо-бар в стиле Twitch (без фона и контуров) ──
+            z-10: печатается ПОВЕРХ эмбиент-свечения плеера, но текст остаётся читаемым */}
+        <div className="fade-up relative z-10 flex flex-wrap items-start gap-x-4 gap-y-3 px-3 pb-5 pt-4 sm:px-4">
+          {/* Аватар: толстое кольцо (live — красное) + плашка LIVE в стиле Twitch:
+              плашка перекрывает нижнюю дугу кольца БЕЗ зазоров (ширина/высота
+              рассчитаны так, чтобы верхний край плашки был выше дуги в её краях).
               Клик — страница канала (как в Twitch) */}
-          <div className="relative shrink-0 self-start pb-2.5 pr-1 pt-1">
+          <div className="relative shrink-0 self-start">
             <span
               className={cn(
                 "grid place-items-center rounded-full p-1",
@@ -830,7 +836,7 @@ export function LiveView() {
             </span>
             {channel.isLive && (
               <span
-                className="live-breathe label-caps absolute bottom-0 left-1/2 -translate-x-1/2 whitespace-nowrap rounded px-1.5 py-px text-[9px] leading-tight text-white"
+                className="label-caps absolute bottom-0 left-1/2 h-3.5 w-10 -translate-x-1/2 rounded-[4px] text-center text-[9px] font-bold leading-[14px] tracking-[0.08em] text-white"
                 style={{ backgroundColor: "#eb0400" }}
                 title="В эфире"
               >
@@ -931,7 +937,7 @@ export function LiveView() {
             <div className="flex items-center gap-1.5 text-[13px]">
               {channel.isLive ? (
                 <>
-                  <Eye className="size-4 text-live" aria-hidden />
+                  <ViewersIcon className="size-4 text-live" />
                   <span className="font-bold tabular-nums text-live">{viewCount}</span>
                 </>
               ) : (
@@ -941,8 +947,11 @@ export function LiveView() {
           </div>
         </div>
 
-        {/* ── «О канале»: описание + панели (редактор для автора) ── */}
-        <AboutSection key={channel.slug} channel={channel} />
+        {/* ── «О канале»: описание + панели (редактор для автора) ──
+            z-10 — поверх эмбиент-свечения плеера */}
+        <div className="relative z-10">
+          <AboutSection key={channel.slug} channel={channel} />
+        </div>
       </div>
 
       {/* ── Чат: справа от md (drag-resize + сворачивание) ── */}
@@ -986,7 +995,7 @@ export function LiveView() {
           className="glass label-caps flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-[12px]"
         >
           <span className="flex items-center gap-1.5 text-foreground">
-            <Eye className="size-4" aria-hidden />
+            <ViewersIcon className="size-4" />
             ЧАТ
           </span>
           {channel.isLive && (
