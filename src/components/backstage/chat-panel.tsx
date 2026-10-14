@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { Crown, Lock, MessageSquare, Send, SmilePlus, Sword, Trash2, Users, Zap, Ban, Clock } from "lucide-react";
+import { Crown, Lock, SmilePlus, Sword, Trash2, Users, Zap, Ban, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -64,14 +64,14 @@ function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: st
 
   return (
     <div className="w-[min(20rem,calc(100vw-5rem))]">
-      <div className="label-caps flex gap-1 border-b border-border pb-1.5">
+      <div className="label-caps flex gap-1 border-b border-white/5 pb-1.5">
         {providers.map((p) => (
           <button
             key={p}
             onClick={() => setTab(p)}
             className={cn(
-              "rounded-sm px-2 py-1 text-[11px] transition-colors",
-              tab === p ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"
+              "rounded-full px-2.5 py-1 text-[11px] transition-colors",
+              tab === p ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-white/5"
             )}
           >
             {p.toUpperCase()}
@@ -86,7 +86,7 @@ function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: st
             onClick={() => onPick(e.name)}
             title={e.name}
             aria-label={`Вставить эмодзи ${e.name}`}
-            className="grid aspect-square place-items-center rounded-md p-1 transition-colors hover:bg-secondary"
+            className="grid aspect-square place-items-center rounded-xl p-1 transition-colors hover:bg-white/5"
           >
             <img src={e.url} alt={e.name} loading="lazy" className="size-6 object-contain" />
           </button>
@@ -257,14 +257,13 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   return (
     <section
       aria-label="Чат трансляции"
-      className={cn("flex h-full min-h-0 flex-col border-border bg-[#141419]", className)}
+      className={cn("flex h-full min-h-0 flex-col overflow-hidden bg-[#0d0d12]/60", className)}
     >
       {/* Заголовок */}
-      <header className="label-caps flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 text-[12px]">
-        <MessageSquare className="size-4 text-primary" aria-hidden />
-        <h2>ЧАТ ЭФИРА</h2>
+      <header className="label-caps glass flex h-12 shrink-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-3.5 text-[12px]">
+        <h2 className="headline text-[12px]">ЧАТ</h2>
         {emotes.length > 0 && (
-          <span className="rounded-sm bg-secondary px-1.5 py-px text-[10px] text-muted-foreground" title="7TV · BTTV · FFZ">
+          <span className="rounded-full bg-white/5 px-2 py-px text-[10px] text-muted-foreground" title="7TV · BTTV · FFZ">
             {emotes.length} ЭМОЦИЙ
           </span>
         )}
@@ -285,7 +284,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       <div className="relative min-h-0 flex-1">
         <div
           ref={ref}
-          className="chat-fade-top absolute inset-0 overflow-y-auto px-3 py-2 text-sm leading-relaxed"
+          className="chat-fade-top absolute inset-0 overflow-y-auto px-3 py-2.5 text-sm leading-relaxed"
           role="log"
           aria-live="polite"
         >
@@ -305,15 +304,15 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
               <div
                 key={m.id}
                 className={cn(
-                  "fade-up group/msg flex gap-2 rounded-sm px-1 py-1 hover:bg-secondary/40",
-                  target?.id === m.id && "bg-secondary/60"
+                  "fade-up group/msg flex gap-2 rounded-xl px-2 py-1 transition-colors hover:bg-white/[.04]",
+                  target?.id === m.id && "bg-white/[.07]"
                 )}
                 onClick={() => {
                   if (!m.system && m.uid && isMod) setTarget({ id: m.id, uid: m.uid, name: m.name });
                   else setTarget(null);
                 }}
               >
-                <Avatar className="mt-0.5 size-6 rounded-full ring-1 ring-border">
+                <Avatar className="mt-0.5 size-6 rounded-full ring-1 ring-white/10">
                   <AvatarImage src={m.avatar ?? undefined} alt={m.name} />
                   <AvatarFallback
                     style={{ backgroundColor: `${m.color}26`, color: m.color }}
@@ -348,7 +347,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
         {pending > 0 && (
           <button
             onClick={scrollToBottom}
-            className="label-caps absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-[11px] text-primary-foreground shadow-lg shadow-primary/30"
+            className="btn-gradient glow-primary label-caps absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3.5 py-1.5 text-[11px] text-white"
           >
             {pending} НОВЫХ ↓
           </button>
@@ -357,7 +356,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
 
       {/* Панель модерации: клик по сообщению (только моды) */}
       {target && isMod && (
-        <div className="fade-up shrink-0 border-t border-border bg-secondary/40 px-2.5 py-2">
+        <div className="fade-up shrink-0 border-t border-white/5 bg-white/[.03] px-2.5 py-2">
           <div className="label-caps flex items-center gap-1.5 text-[10px] text-muted-foreground">
             <Sword className="size-3.5 text-[#5ad1a4]" aria-hidden />
             МОДЕРАЦИЯ · {target.name}
@@ -422,7 +421,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
 
       {/* Подсказка команд */}
       {showCommandHint && (
-        <div className="label-caps shrink-0 border-t border-border bg-secondary/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="label-caps shrink-0 border-t border-white/5 bg-white/[.02] px-3 py-1.5 text-[10px] text-muted-foreground">
           КОМАНДЫ: !UPTIME · !TITLE · !КОМАНДЫ · !ЭМОЦИИ
           {isMod && " · /BAN · /TIMEOUT · /CLEAR · /SLOW · /SO"}
           {isOwner && " · /MOD · /DEMO"}
@@ -430,24 +429,24 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       )}
 
       {/* Ввод */}
-      <footer className="shrink-0 border-t border-border p-2.5 pb-[max(env(safe-area-inset-bottom),0.625rem)]">
+      <footer className="shrink-0 border-t border-white/5 p-2.5 pb-[max(env(safe-area-inset-bottom),0.625rem)]">
         {!user ? (
           <Button
             variant="secondary"
-            className="label-caps w-full gap-2 text-[12px]"
+            className="glass label-caps w-full gap-2 rounded-full text-[12px]"
             onClick={() => setAuthOpen(true)}
           >
             <Lock className="size-4" />
             ВОЙДИТЕ, ЧТОБЫ УЧАСТВОВАТЬ
           </Button>
         ) : !canSend ? (
-          <div className="label-caps flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-[11px] text-muted-foreground">
+          <div className="label-caps glass flex items-center gap-2 rounded-full px-4 py-2.5 text-[11px] text-muted-foreground">
             <Crown className="size-4 shrink-0 text-primary" />
-            ЧАТ ДОСТУПЕН ТОЛЬКО ПЛАТНЫМ ПОДПИСЧИКАМ
+            ЧАТ ДОСТУПЕН ТОЛЬКО ПОДПИСЧИКАМ
           </div>
         ) : (
           <form
-            className="flex items-center gap-1.5"
+            className="flex items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
               send();
@@ -460,24 +459,30 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
                 placeholder="НАПИСАТЬ СООБЩЕНИЕ…"
                 aria-label="Сообщение в чат"
                 maxLength={500}
-                className="label-caps border-border bg-[#1a1a21] pr-9 text-[12px] placeholder:text-muted-foreground/50 focus-visible:ring-primary/60"
+                className="label-caps rounded-full border-white/10 bg-white/[.05] pr-10 text-[12px] placeholder:text-muted-foreground/50 focus-visible:ring-primary/60"
               />
               <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
                     aria-label="Эмодзи"
-                    className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+                    className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-primary"
                   >
                     <SmilePlus className="size-4" />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent align="end" side="top" className="w-auto border-border bg-popover p-2">
+                <PopoverContent align="end" side="top" className="glass-strong w-auto rounded-xl p-2">
                   <EmotePicker emotes={emotes} onPick={insertEmote} />
                 </PopoverContent>
               </Popover>
             </div>
-            <Button type="submit" size="icon" aria-label="Отправить" disabled={!draft.trim()}>
+            <Button
+              type="submit"
+              size="icon"
+              aria-label="Отправить"
+              disabled={!draft.trim()}
+              className="btn-gradient glow-primary shrink-0 rounded-full"
+            >
               <Zap className="size-4" />
             </Button>
           </form>

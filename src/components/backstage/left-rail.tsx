@@ -1,6 +1,7 @@
 "use client";
 
-// Левый рейл (десктоп) + нижняя навигация (мобайл).
+// Левый icon-rail (десктоп, Twitch-стиль) + плавающий мобильный док (Apple-стиль).
+// Список «КАНАЛЫ» удалён: платформа живёт вокруг одного канала dypaGPT.
 
 import {
   Calendar,
@@ -11,25 +12,30 @@ import {
   Video,
   type LucideIcon,
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useBackstageStore, type View } from "@/components/backstage/store";
-import { formatCount } from "@/components/backstage/hooks";
 import { toast } from "@/hooks/use-toast";
 
 type NavItem = {
   id: View;
   label: string;
+  short: string;
   icon: LucideIcon;
 };
 
 const NAV: NavItem[] = [
-  { id: "live", label: "В ЭФИРЕ", icon: Radio },
-  { id: "home", label: "ГЛАВНАЯ", icon: Home },
-  { id: "clips", label: "КЛИПЫ", icon: Clapperboard },
-  { id: "recordings", label: "ЗАПИСИ", icon: Video },
-  { id: "collabs", label: "КОЛЛАБОРАЦИИ", icon: Users },
-  { id: "schedule", label: "РАСПИСАНИЕ", icon: Calendar },
+  { id: "live", label: "В ЭФИРЕ", short: "ЭФИР", icon: Radio },
+  { id: "home", label: "ГЛАВНАЯ", short: "ГЛАВ.", icon: Home },
+  { id: "clips", label: "КЛИПЫ", short: "КЛИПЫ", icon: Clapperboard },
+  { id: "recordings", label: "ЗАПИСИ", short: "ЗАПИСИ", icon: Video },
+  { id: "collabs", label: "КОЛЛАБОРАЦИИ", short: "ЛАБЫ", icon: Users },
+  { id: "schedule", label: "РАСПИСАНИЕ", short: "АЙСОН", icon: Calendar },
 ];
 
 function useNavActions() {
@@ -42,11 +48,16 @@ function useNavActions() {
       if (liveChannels.length > 0) {
         openChannel(liveChannels[0].slug);
       } else {
-        setView("home");
-        toast({
-          title: "Сейчас все каналы офлайн",
-          description: "Загляните в расписание — ближайший эфир уже отмечен",
-        });
+        // офлайн: всё равно открываем экран канала (расписание + напоминание)
+        const fallback = channels[0];
+        if (fallback) openChannel(fallback.slug);
+        else {
+          setView("home");
+          toast({
+            title: "Эфира сейчас нет",
+            description: "Загляните в расписание — ближайший эфир уже отмечен",
+          });
+        }
       }
       return;
     }
@@ -57,95 +68,55 @@ function useNavActions() {
 }
 
 export function LeftRail() {
-  const { channels, view, activeChannel, openChannel } = useBackstageStore();
   const { go, liveCount } = useNavActions();
+  const view = useBackstageStore((s) => s.view);
 
   return (
-    <nav
-      aria-label="Основная навигация"
-      className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-sidebar lg:flex"
-    >
-      <div className="p-2">
+    <TooltipProvider delayDuration={200}>
+      <nav
+        aria-label="Основная навигация"
+        className="sticky top-16 hidden h-[calc(100vh-4rem)] w-[76px] shrink-0 flex-col items-center gap-1 border-r border-white/5 bg-sidebar/60 py-3 backdrop-blur-xl lg:flex"
+      >
         {NAV.map((item) => {
           const isActive = view === item.id;
           return (
-            <button
-              key={item.id}
-              onClick={() => go(item.id)}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                "label-caps group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] transition-colors",
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-              )}
-            >
-              <item.icon className={cn("size-5", isActive && "text-primary")} />
-              <span className="flex-1 text-left">{item.label}</span>
-              {item.id === "live" && liveCount > 0 && (
-                <span className="flex items-center gap-1.5 rounded-sm bg-live px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white">
-                  <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
-                  LIVE
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="label-caps mt-2 px-4 pb-1 pt-3 text-[11px] text-muted-foreground/70">
-        КАНАЛЫ
-      </div>
-      <div className="p-2 pt-0">
-        {channels.map((c) => {
-          const isActive = view === "live" && activeChannel === c.slug;
-          return (
-            <button
-              key={c.slug}
-              onClick={() => openChannel(c.slug)}
-              aria-current={isActive ? "page" : undefined}
-              className={cn(
-                "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors",
-                isActive ? "bg-secondary" : "hover:bg-secondary/70"
-              )}
-            >
-              <span className="relative shrink-0">
-                <Avatar className="size-8 rounded-full ring-1 ring-border">
-                  <AvatarImage src={c.avatarUrl ?? undefined} alt={c.name} />
-                  <AvatarFallback
-                    style={{ backgroundColor: `${c.accentColor}26`, color: c.accentColor }}
-                    className="rounded-full text-xs font-semibold"
-                  >
-                    {c.name.slice(0, 1).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                {c.isLive && (
+            <Tooltip key={item.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => go(item.id)}
+                  aria-current={isActive ? "page" : undefined}
+                  aria-label={item.label}
+                  className={cn(
+                    "group relative grid size-14 w-full place-items-center rounded-2xl transition-all duration-200",
+                    isActive
+                      ? "bg-primary/15 text-primary"
+                      : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                  )}
+                >
+                  {/* индикатор активного пункта — лавандовая полоса слева */}
                   <span
-                    className="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-sidebar bg-live live-dot"
-                    aria-label="В эфире"
+                    aria-hidden
+                    className={cn(
+                      "absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-primary transition-all duration-200",
+                      isActive ? "opacity-100 glow-soft" : "h-0 opacity-0"
+                    )}
                   />
-                )}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{c.name}</span>
-                {c.isLive ? (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <span className="size-1.5 rounded-full bg-live" aria-hidden />
-                    {formatCount(c.viewers)} смотрят
+                  <span className="relative">
+                    <item.icon className={cn("size-6 transition-transform duration-200 group-hover:scale-110", isActive && "drop-shadow-[0_0_8px_rgba(169,112,255,0.6)]")} />
+                    {item.id === "live" && liveCount > 0 && (
+                      <span className="live-dot absolute -right-1 -top-1 size-2.5 rounded-full bg-live ring-2 ring-sidebar" aria-hidden />
+                    )}
                   </span>
-                ) : (
-                  <span className="block truncate text-xs text-muted-foreground/60">Оффлайн</span>
-                )}
-              </span>
-            </button>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right" sideOffset={8} className="label-caps glass-strong rounded-lg px-3 py-1.5 text-[11px]">
+                {item.label}
+              </TooltipContent>
+            </Tooltip>
           );
         })}
-      </div>
-
-      <div className="label-caps mt-auto p-4 text-[10px] leading-relaxed text-muted-foreground/50">
-        BACKSTAGE v0.2 · ПРИВАТНЫЕ ТРАНСЛЯЦИИ
-      </div>
-    </nav>
+      </nav>
+    </TooltipProvider>
   );
 }
 
@@ -156,12 +127,10 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Мобильная навигация"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-[#0d0d11]/95 backdrop-blur-md lg:hidden"
+      className="fixed inset-x-3 bottom-3 z-40 lg:hidden"
+      style={{ WebkitTapHighlightColor: "transparent" }}
     >
-      <div
-        className="grid grid-cols-6 pb-[max(env(safe-area-inset-bottom),6px)] pt-1.5"
-        style={{ WebkitTapHighlightColor: "transparent" }}
-      >
+      <div className="glass-strong flex items-stretch justify-around rounded-3xl p-1.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.8)]">
         {NAV.map((item) => {
           const isActive = view === item.id;
           return (
@@ -169,22 +138,30 @@ export function MobileNav() {
               key={item.id}
               onClick={() => go(item.id)}
               aria-current={isActive ? "page" : undefined}
-              className="relative flex min-h-[44px] flex-col items-center gap-0.5 px-1 py-1"
+              className="relative flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-0.5 py-1.5 transition-colors"
             >
               <span className="relative">
-                <item.icon className={cn("size-5", isActive ? "text-primary" : "text-muted-foreground")} />
+                <item.icon
+                  className={cn(
+                    "size-5.5 transition-all duration-200",
+                    isActive ? "scale-110 text-primary drop-shadow-[0_0_8px_rgba(169,112,255,0.55)]" : "text-muted-foreground"
+                  )}
+                />
                 {item.id === "live" && liveCount > 0 && (
-                  <span className="absolute -right-1.5 -top-0.5 size-2 rounded-full bg-live live-dot" aria-hidden />
+                  <span className="live-dot absolute -right-1.5 -top-0.5 size-2 rounded-full bg-live" aria-hidden />
                 )}
               </span>
               <span
                 className={cn(
-                  "label-caps text-[9px]",
-                  isActive ? "text-primary" : "text-muted-foreground"
+                  "label-caps text-[8.5px] leading-none",
+                  isActive ? "text-primary" : "text-muted-foreground/80"
                 )}
               >
-                {item.label === "В ЭФИРЕ" ? "ЭФИР" : item.label}
+                {item.short}
               </span>
+              {isActive && (
+                <span aria-hidden className="absolute -top-1 h-1 w-1 rounded-full bg-primary glow-soft" />
+              )}
             </button>
           );
         })}

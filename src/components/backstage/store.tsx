@@ -16,7 +16,6 @@ type AppState = {
   channels: PublicChannel[];
   authOpen: boolean;
   adminOpen: boolean;
-  searchQuery: string;
 
   setView: (v: View) => void;
   openChannel: (slug: string) => void;
@@ -25,18 +24,18 @@ type AppState = {
   patchChannel: (slug: string, patch: Partial<PublicChannel>) => void;
   setAuthOpen: (b: boolean) => void;
   setAdminOpen: (b: boolean) => void;
-  setSearchQuery: (q: string) => void;
 };
 
 function createBackstageStore(initial: { channels: PublicChannel[]; user: PublicUser | null }) {
+  // STREAM-FIRST: при открытии сайта с активным эфиром сразу показываем трансляцию
+  const liveSlug = initial.channels.find((c) => c.isLive)?.slug ?? null;
   return createStore<AppState>()((set) => ({
-    view: "home",
-    activeChannel: initial.channels.find((c) => c.isLive)?.slug ?? null,
+    view: liveSlug ? "live" : "home",
+    activeChannel: liveSlug ?? initial.channels[0]?.slug ?? null,
     user: initial.user,
     channels: initial.channels,
     authOpen: false,
     adminOpen: false,
-    searchQuery: "",
 
     setView: (view) => set({ view }),
     openChannel: (slug) => set({ view: "live", activeChannel: slug }),
@@ -46,7 +45,6 @@ function createBackstageStore(initial: { channels: PublicChannel[]; user: Public
       set((s) => ({ channels: s.channels.map((c) => (c.slug === slug ? { ...c, ...patch } : c)) })),
     setAuthOpen: (authOpen) => set({ authOpen }),
     setAdminOpen: (adminOpen) => set({ adminOpen }),
-    setSearchQuery: (searchQuery) => set({ searchQuery }),
   }));
 }
 

@@ -1,8 +1,8 @@
 "use client";
 
-// Коллаборации: совместные эфиры нескольких авторов Бэкстейджа.
+// Коллаборации: совместные эфиры с гостями канала.
 
-import { GitBranch, Sparkles, Users2 } from "lucide-react";
+import { Sparkles, Users2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,9 +12,9 @@ import type { CollabDto } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const STATUS_META: Record<CollabDto["status"], { label: string; className: string }> = {
-  confirmed: { label: "Подтверждено", className: "bg-[#5ad1a4]/15 text-[#5ad1a4] hover:bg-[#5ad1a4]/15" },
-  planning: { label: "В планировании", className: "bg-primary/15 text-primary hover:bg-primary/15" },
-  idea: { label: "Идея", className: "bg-secondary text-muted-foreground hover:bg-secondary" },
+  confirmed: { label: "Подтверждено", className: "rounded-full bg-[#5ad1a4]/15 text-[#5ad1a4] hover:bg-[#5ad1a4]/15" },
+  planning: { label: "В планировании", className: "rounded-full bg-primary/15 text-primary hover:bg-primary/15" },
+  idea: { label: "Идея", className: "rounded-full bg-secondary text-muted-foreground hover:bg-secondary" },
 };
 
 export function CollabsView() {
@@ -23,29 +23,20 @@ export function CollabsView() {
   const bySlug = (slug: string) => channels.find((c) => c.slug === slug);
 
   return (
-    <div className="space-y-6 px-3 py-4 sm:px-5 sm:py-6 lg:px-6">
-      <header className="fade-up flex flex-wrap items-center gap-3">
-        <Users2 className="size-6 text-primary" />
-        <div>
-          <h1 className="headline text-xl sm:text-2xl">Коллаборации</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Совместные эфиры с гостями канала
-          </p>
-        </div>
-        <div className="label-caps ml-auto hidden items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-[11px] text-accent-foreground sm:flex">
-          <GitBranch className="size-3.5 text-primary" />
-          Несколько авторов — один эфир
-        </div>
+    <div className="space-y-6 px-3 py-4 sm:px-5 sm:py-6 lg:px-7">
+      <header className="fade-up flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <h1 className="headline text-xl sm:text-3xl">КОЛЛАБОРАЦИИ</h1>
+        <p className="label-caps text-[11px] text-muted-foreground">СОВМЕСТНЫЕ ЭФИРЫ С ГОСТЯМИ</p>
       </header>
 
       {collabs === null ? (
         <div className="grid gap-4 lg:grid-cols-2">
           {[0, 1].map((i) => (
-            <Skeleton key={i} className="h-44 w-full rounded-xl" />
+            <Skeleton key={i} className="h-44 w-full rounded-2xl" />
           ))}
         </div>
       ) : collabs.length === 0 ? (
-        <div className="grid place-items-center rounded-xl border border-dashed border-border py-16 text-center">
+        <div className="grid place-items-center rounded-2xl border border-dashed border-white/10 py-16 text-center">
           <Users2 className="size-8 text-muted-foreground/50" />
           <p className="mt-3 text-sm text-muted-foreground">Коллабораций пока нет</p>
         </div>
@@ -57,7 +48,7 @@ export function CollabsView() {
             return (
               <article
                 key={collab.id}
-                className="fade-up rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/35 sm:p-5"
+                className="fade-up rounded-2xl border border-white/5 bg-white/[.03] p-4 backdrop-blur-md transition-all duration-200 hover:border-primary/40 hover:bg-white/[.05] sm:p-5"
               >
                 <div className="flex items-start gap-3">
                   <Sparkles className="mt-0.5 size-5 shrink-0 text-primary" />
@@ -69,14 +60,14 @@ export function CollabsView() {
                       </p>
                     )}
                   </div>
-                  <Badge className={cn("shrink-0", meta.className)}>{meta.label}</Badge>
+                  <Badge className={cn("label-caps shrink-0", meta.className)}>{meta.label}</Badge>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <span className="flex -space-x-2.5">
                     {collab.members.map((m) => (
                       <span key={m.slug} className="relative" title={`${m.name} — ${m.role}`}>
-                        <Avatar className="size-8 rounded-full ring-2 ring-card">
+                        <Avatar className="size-8 rounded-full ring-2 ring-[#111116]">
                           <AvatarImage src={m.avatarUrl ?? undefined} alt={m.name} />
                           <AvatarFallback
                             style={{
@@ -95,7 +86,7 @@ export function CollabsView() {
                     {collab.members.map((m) => `${m.name} (${m.role})`).join(" · ")}
                   </span>
                   {when && (
-                    <span className="ml-auto text-xs font-medium text-primary">
+                    <span className="label-caps ml-auto text-[11px] text-primary">
                       {when.day} · {when.time}
                     </span>
                   )}

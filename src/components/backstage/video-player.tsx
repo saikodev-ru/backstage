@@ -211,8 +211,8 @@ export function VideoPlayer({
     <div
       ref={wrapRef}
       className={cn(
-        "group relative aspect-video w-full overflow-hidden rounded-lg bg-black",
-        fullscreen && "aspect-auto h-full rounded-none"
+        "group relative aspect-video w-full overflow-hidden bg-black",
+        fullscreen ? "aspect-auto h-full rounded-none" : "rounded-2xl"
       )}
     >
       {/* Постер для гостей / без источника */}
@@ -258,13 +258,13 @@ export function VideoPlayer({
 
       {/* Гейт доступа */}
       {locked && (
-        <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-black/70 via-black/75 to-black/85 px-4">
+        <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-black/75 via-black/80 to-black/90 px-4 backdrop-blur-[2px]">
           <div className="fade-up max-w-md text-center">
-            <div className="mx-auto grid size-14 place-items-center rounded-full bg-primary/20 ring-1 ring-primary/40">
-              <Lock className="size-6 text-primary" />
+            <div className="glow-primary mx-auto grid size-16 place-items-center rounded-full bg-primary/20 ring-1 ring-primary/40">
+              <Lock className="size-7 text-primary" />
             </div>
-            <h3 className="mt-4 text-lg font-bold sm:text-xl">{lockTitle ?? "Приватная трансляция"}</h3>
-            <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
+            <h3 className="headline mt-5 text-lg sm:text-xl">{lockTitle ?? "ПРИВАТНАЯ ТРАНСЛЯЦИЯ"}</h3>
+            <p className="mx-auto mt-2.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
               {lockDescription ?? "Доступ к эфиру — только для платных подписчиков приватного Telegram-канала."}
             </p>
             {lockChildren && <div className="mt-5 flex flex-col items-center gap-2.5">{lockChildren}</div>}

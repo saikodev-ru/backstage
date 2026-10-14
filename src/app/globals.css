@@ -40,44 +40,46 @@
   --color-card: var(--card);
   --color-live: var(--live);
   --color-graphite: var(--graphite);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 }
 
 /*
- * Бэкстейдж: тёмный шершавый графит + лаванда.
+ * BACKSTAGE «GLASS ARENA» v2
+ * Apple-стекло × Twitch-эфир × дерзость: глубокий чёрный, aurora-подсветка,
+ * лавандовый градиент, огромная типографика Unbounded, glow-акценты.
  * Приложение тёмное по умолчанию (светлой темы нет).
  */
 :root {
-  --radius: 0.5rem;
+  --radius: 1rem;
   color-scheme: dark;
 
-  /* графитовый фон с лёгким лавандовым подтоном */
-  --background: #101014;
-  --foreground: #efeff4;
-  --card: #17171d;
-  --card-foreground: #efeff4;
-  --popover: #1b1b22;
-  --popover-foreground: #efeff4;
+  /* глубокий почти-чёрный канвас */
+  --background: #09090d;
+  --foreground: #f4f4f8;
+  --card: #111116;
+  --card-foreground: #f4f4f8;
+  --popover: #16161d;
+  --popover-foreground: #f4f4f8;
 
-  /* лавандовый акцент */
+  /* электрическая лаванда */
   --primary: #a970ff;
   --primary-foreground: #ffffff;
-  --secondary: #23232b;
-  --secondary-foreground: #e8e8f0;
-  --muted: #1f1f26;
-  --muted-foreground: #9a9aa6;
-  --accent: #262034;
-  --accent-foreground: #d6c2ff;
+  --secondary: #1d1d25;
+  --secondary-foreground: #ececf2;
+  --muted: #1a1a21;
+  --muted-foreground: #9d9dac;
+  --accent: #221c33;
+  --accent-foreground: #d9c6ff;
   --destructive: #e5484d;
-  --border: #26262e;
-  --input: #26262e;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: #a970ff;
 
   --live: #eb0400;
-  --graphite: #0c0c0f;
+  --graphite: #0b0b0f;
 
   --chart-1: #a970ff;
   --chart-2: #5ad1a4;
@@ -85,44 +87,44 @@
   --chart-4: #ff7bac;
   --chart-5: #7bd3ff;
 
-  --sidebar: #141419;
-  --sidebar-foreground: #efeff4;
+  --sidebar: #0c0c11;
+  --sidebar-foreground: #f4f4f8;
   --sidebar-primary: #a970ff;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #221d2e;
-  --sidebar-accent-foreground: #d6c2ff;
-  --sidebar-border: #232329;
+  --sidebar-accent: #221c33;
+  --sidebar-accent-foreground: #d9c6ff;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
   --sidebar-ring: #a970ff;
 }
 
 .dark {
-  --background: #101014;
-  --foreground: #efeff4;
-  --card: #17171d;
-  --card-foreground: #efeff4;
-  --popover: #1b1b22;
-  --popover-foreground: #efeff4;
+  --background: #09090d;
+  --foreground: #f4f4f8;
+  --card: #111116;
+  --card-foreground: #f4f4f8;
+  --popover: #16161d;
+  --popover-foreground: #f4f4f8;
   --primary: #a970ff;
   --primary-foreground: #ffffff;
-  --secondary: #23232b;
-  --secondary-foreground: #e8e8f0;
-  --muted: #1f1f26;
-  --muted-foreground: #9a9aa6;
-  --accent: #262034;
-  --accent-foreground: #d6c2ff;
+  --secondary: #1d1d25;
+  --secondary-foreground: #ececf2;
+  --muted: #1a1a21;
+  --muted-foreground: #9d9dac;
+  --accent: #221c33;
+  --accent-foreground: #d9c6ff;
   --destructive: #e5484d;
-  --border: #26262e;
-  --input: #26262e;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.1);
   --ring: #a970ff;
   --live: #eb0400;
-  --graphite: #0c0c0f;
-  --sidebar: #141419;
-  --sidebar-foreground: #efeff4;
+  --graphite: #0b0b0f;
+  --sidebar: #0c0c11;
+  --sidebar-foreground: #f4f4f8;
   --sidebar-primary: #a970ff;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #221d2e;
-  --sidebar-accent-foreground: #d6c2ff;
-  --sidebar-border: #232329;
+  --sidebar-accent: #221c33;
+  --sidebar-accent-foreground: #d9c6ff;
+  --sidebar-border: rgba(255, 255, 255, 0.07);
   --sidebar-ring: #a970ff;
 }
 
@@ -133,47 +135,114 @@
   html {
     scrollbar-gutter: stable;
   }
+  ::selection {
+    background: rgba(169, 112, 255, 0.35);
+  }
   body {
     @apply bg-background text-foreground;
-    background-image: radial-gradient(1100px 520px at 50% -160px, #1a1a22 0%, rgba(16, 16, 20, 0) 70%);
-    background-attachment: fixed;
   }
 
-  /* «шершавый графит»: лёгкое зерно поверх всего интерфейса */
+  /* aurora: два фиксированных лавандовых свечения — «арена» под стеклом */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background:
+      radial-gradient(52rem 30rem at 12% -8%, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0) 60%),
+      radial-gradient(44rem 26rem at 96% 4%, rgba(169, 112, 255, 0.1) 0%, rgba(169, 112, 255, 0) 55%),
+      radial-gradient(60rem 40rem at 50% 118%, rgba(93, 52, 160, 0.12) 0%, rgba(93, 52, 160, 0) 60%);
+  }
+
+  /* лёгкое киношное зерно поверх интерфейса */
   body::after {
     content: "";
     position: fixed;
     inset: 0;
-    z-index: 200;
+    z-index: 90;
     pointer-events: none;
-    opacity: 0.05;
+    opacity: 0.038;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 160px 160px;
     mix-blend-mode: overlay;
   }
 }
 
-/* тонкие тёмные скроллбары */
+/* ── Скроллбары ───────────────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2e2e38 transparent;
+  scrollbar-color: rgba(169, 112, 255, 0.25) transparent;
 }
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2e2e38;
+  background: rgba(169, 112, 255, 0.22);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a46;
+  background: rgba(169, 112, 255, 0.4);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* пульсирующий индикатор LIVE */
+/* ── Стеклянные поверхности (Apple) ───────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+.glass-strong {
+  background: rgba(14, 14, 19, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+}
+
+/* ── Glow-эффекты (дерзость) ──────────────────────────────────────────── */
+.glow-primary {
+  box-shadow:
+    0 10px 30px -10px rgba(169, 112, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.glow-soft {
+  box-shadow: 0 0 40px -12px rgba(169, 112, 255, 0.35);
+}
+.glow-live {
+  box-shadow: 0 0 22px -2px rgba(235, 4, 0, 0.55);
+}
+
+/* градиентный текст — логотип и акценты */
+.text-gradient {
+  background: linear-gradient(94deg, #efdfff 0%, #b993ff 42%, #8b5cf6 78%, #6d3eda 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* градиентная заливка для primary-кнопок */
+.btn-gradient {
+  background-image: linear-gradient(135deg, #b18cff 0%, #a970ff 45%, #8b5cf6 100%);
+  transition:
+    transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1),
+    box-shadow 0.18s ease,
+    filter 0.18s ease;
+}
+.btn-gradient:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+.btn-gradient:active {
+  transform: translateY(0) scale(0.985);
+}
+
+/* ── Анимации ─────────────────────────────────────────────────────────── */
+
+/* пульс LIVE-точки */
 @keyframes live-pulse {
   0%,
   100% {
@@ -181,18 +250,33 @@
     transform: scale(1);
   }
   50% {
-    opacity: 0.55;
-    transform: scale(0.85);
+    opacity: 0.5;
+    transform: scale(0.8);
   }
 }
 .live-dot {
-  animation: live-pulse 1.8s ease-in-out infinite;
+  animation: live-pulse 1.6s ease-in-out infinite;
 }
 
+/* дыхание glow у LIVE-пилюли */
+@keyframes live-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(235, 4, 0, 0);
+  }
+  50% {
+    box-shadow: 0 0 16px 1px rgba(235, 4, 0, 0.45);
+  }
+}
+.live-breathe {
+  animation: live-breathe 2.4s ease-in-out infinite;
+}
+
+/* появление элементов */
 @keyframes fade-up {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -200,40 +284,101 @@
   }
 }
 .fade-up {
-  animation: fade-up 0.28s ease-out both;
+  animation: fade-up 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-/* чат: тонкий градиент маски сверху */
+/* переход между экранами — пружинка Apple */
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.994);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.view-in {
+  animation: view-in 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* бегущая строка тикера */
+@keyframes ticker-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker-scroll 26s linear infinite;
+  will-change: transform;
+}
+.ticker:hover .ticker-track {
+  animation-play-state: paused;
+}
+
+/* медленное «дыхание» aurora в hero */
+@keyframes aurora-drift {
+  0%,
+  100% {
+    background-position:
+      0% 0%,
+      100% 0%,
+      50% 100%;
+  }
+  50% {
+    background-position:
+      18% 12%,
+      84% -10%,
+      42% 112%;
+  }
+}
+
+/* чат: маска сверху */
 .chat-fade-top {
   mask-image: linear-gradient(to bottom, transparent 0, black 28px);
 }
 
-/* ── Толстая типографика «Бэкстейдж» ─────────────────────────────────── */
+/* ── Типографика BACKSTAGE ────────────────────────────────────────────── */
 
-/* Дисплейный шрифт (Unbounded) + верхний регистр — лого, заголовки секций */
+/* дисплейный Unbounded + капс — лого, герой, крупные заголовки */
 .headline {
   font-family: var(--font-unbounded), var(--font-golos), system-ui, sans-serif;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  line-height: 1.1;
+  letter-spacing: 0.03em;
+  line-height: 1.08;
 }
 
-/* Жирные капс-лейблы поменьше (навигация, бейджи, кнопки-ссылки) */
+/* гигантский герой-текст (Apple large-title масштаб) */
+.display-hero {
+  font-family: var(--font-unbounded), var(--font-golos), system-ui, sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.02;
+  font-size: clamp(1.6rem, 4.2vw, 3.4rem);
+}
+
+/* жирные капс-лейблы (навигация, бейджи, кнопки) */
 .label-caps {
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
 }
 
-/* Толстые заголовки карточек (Golos 800, капс) */
+/* заголовки карточек */
 .card-title {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
-/* Жирный логотип BACKSTAGE */
+/* логотип BACKSTAGE */
 .brand {
   font-family: var(--font-unbounded), var(--font-golos), system-ui, sans-serif;
   font-weight: 900;
@@ -241,11 +386,24 @@
   letter-spacing: 0.08em;
 }
 
-/* soft blur-up для картинок, пока не загрузились */
+/* ── Кино-скрим для карточек и hero ───────────────────────────────────── */
+.scrim {
+  background: linear-gradient(
+    to top,
+    rgba(5, 5, 8, 0.88) 0%,
+    rgba(5, 5, 8, 0.45) 38%,
+    rgba(5, 5, 8, 0.08) 66%,
+    rgba(5, 5, 8, 0) 100%
+  );
+}
+
+/* blur-up для картинок */
 img.blur-up {
   filter: blur(16px) saturate(1.1);
   transform: scale(1.04);
-  transition: filter 0.5s ease-out, transform 0.5s ease-out;
+  transition:
+    filter 0.5s ease-out,
+    transform 0.5s ease-out;
 }
 img.blur-up.loaded {
   filter: none;

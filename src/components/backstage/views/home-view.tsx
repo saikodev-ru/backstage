@@ -1,19 +1,21 @@
 "use client";
 
-// Главная «Бэкстейдж» — витрина dypaGPT в стиле Twitch:
-// герой эфира, клипы, записи и расписание. Толстая типографика, UPPERCASE.
+// Главная «GLASS ARENA»: герой (эфир или канвас канала) + секции.
+// Толстая типографика, кино-карточки, минимум лишнего.
 
-import { Clapperboard, Radio, Sparkles, Video, Calendar, ArrowRight, Sparkles as SparklesIcon, Gamepad2 } from "lucide-react";
+import { ArrowRight, Clapperboard, Radio, Sparkles, Video, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackstageStore } from "@/components/backstage/store";
-import { useContent } from "@/components/backstage/hooks";
+import { useContent, formatCount } from "@/components/backstage/hooks";
 import {
   ClipCard,
   LiveChannelCard,
   RecordingCard,
   ScheduleRow,
 } from "@/components/backstage/cards";
+import { SmartImage } from "@/components/backstage/smart-image";
 import type { ClipDto, RecordingDto, ScheduleDto } from "@/lib/types";
 
 function Section({
@@ -29,14 +31,14 @@ function Section({
 }) {
   return (
     <section aria-label={title} className="fade-up">
-      <header className="mb-3.5 flex items-center gap-2.5">
+      <header className="mb-4 flex items-center gap-3">
         <Icon className="size-5 text-primary" />
         <h2 className="headline text-base sm:text-lg">{title}</h2>
         {action && (
           <Button
             variant="ghost"
             size="sm"
-            className="label-caps ml-auto gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="label-caps ml-auto gap-1.5 rounded-full text-[11px] text-muted-foreground hover:bg-white/5 hover:text-foreground"
             onClick={action.onClick}
           >
             {action.label}
@@ -61,18 +63,15 @@ export function HomeView() {
   const bySlug = (slug: string) => channels.find((c) => c.slug === slug);
 
   return (
-    <div className="space-y-9 px-3 py-4 sm:px-5 sm:py-6 lg:px-6">
+    <div className="space-y-10 px-3 py-4 sm:px-5 sm:py-6 lg:px-7">
       {/* Герой: текущий эфир dypaGPT */}
       {hero ? (
-        <section aria-label="Сейчас в эфире" className="fade-up">
-          <header className="mb-3.5 flex items-center gap-2.5">
+        <section aria-label="Сейчас в эфире">
+          <header className="mb-4 flex items-center gap-3">
             <Radio className="size-5 text-live" />
-            <h2 className="headline text-base sm:text-lg">Сейчас в эфире</h2>
-            <span className="label-caps rounded-full bg-live/15 px-2 py-0.5 text-[11px] text-[#ff6b6b]">
-              {liveChannels.length > 1 ? `${liveChannels.length} канала` : "1 канал"}
-            </span>
+            <h2 className="headline text-base sm:text-lg">СЕЙЧАС В ЭФИРЕ</h2>
           </header>
-          <div className="grid gap-5 lg:grid-cols-[1.9fr_1fr] lg:gap-6">
+          <div className="grid gap-5 lg:grid-cols-[2.1fr_1fr] lg:gap-6">
             <LiveChannelCard channel={hero} hero />
             {liveChannels.length > 1 && (
               <div className="grid content-start gap-4 sm:grid-cols-2 lg:grid-cols-1">
@@ -84,52 +83,77 @@ export function HomeView() {
           </div>
         </section>
       ) : (
-        <section className="fade-up rounded-xl border border-border bg-gradient-to-br from-accent/40 via-card to-card p-6 sm:p-8">
-          <div className="flex items-center gap-2.5">
-            <Sparkles className="size-5 text-primary" />
-            <h2 className="headline text-base sm:text-lg">dypaGPT сейчас отдыхает</h2>
-          </div>
-          <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-            Эфира нет, но витрина живёт: расписание, клипы и архив на месте.
-            Подписка на уведомления — и вы не пропустите старт.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button className="label-caps gap-2" onClick={() => setView("schedule")}>
-              <Calendar className="size-4" />
-              Расписание
-            </Button>
-            <Button variant="secondary" className="label-caps gap-2" onClick={() => setView("recordings")}>
-              <Video className="size-4" />
-              Записи эфиров
-            </Button>
-          </div>
-        </section>
+        /* Офлайн-герой: канвас канала dypaGPT */
+        main && (
+          <section aria-label="Канал dypaGPT" className="fade-up">
+            <div className="group relative overflow-hidden rounded-3xl ring-1 ring-white/10">
+              <div className="relative aspect-[21/10] max-h-[520px] w-full">
+                <SmartImage
+                  src={main.bannerUrl}
+                  alt={main.name}
+                  accent={main.accentColor}
+                  label={main.name}
+                  eager
+                  className="absolute inset-0"
+                  imgClassName="opacity-80"
+                />
+                <span className="scrim pointer-events-none absolute inset-0" />
+                <span
+                  aria-hidden
+                  className="absolute inset-0"
+                  style={{ background: `radial-gradient(90% 120% at 15% 100%, ${main.accentColor}30 0%, transparent 60%)` }}
+                />
+                <span className="absolute inset-x-0 bottom-0 flex items-end gap-4 p-5 sm:p-7">
+                  <Avatar className="size-16 shrink-0 rounded-3xl ring-2 ring-white/25 sm:size-20">
+                    <AvatarImage src={main.avatarUrl ?? undefined} alt={main.name} />
+                    <AvatarFallback
+                      style={{ backgroundColor: `${main.accentColor}33`, color: main.accentColor }}
+                      className="rounded-3xl text-2xl font-black sm:text-3xl"
+                    >
+                      {main.name.slice(0, 1).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="min-w-0 flex-1">
+                    <span className="display-hero block truncate">{main.name}</span>
+                    <span className="label-caps mt-1.5 block text-[11px] text-white/70 sm:text-xs">
+                      {main.tagline ?? `@${main.handle}`} · {formatCount(main.followers)} подписчиков
+                    </span>
+                    <span className="mt-4 flex flex-wrap gap-2.5">
+                      <Button
+                        className="btn-gradient glow-primary label-caps gap-2 rounded-full px-5"
+                        onClick={() => openChannel(main.slug)}
+                      >
+                        <Radio className="size-4" />
+                        ПЕРЕЙТИ НА КАНАЛ
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="glass label-caps gap-2 rounded-full px-5"
+                        onClick={() => setView("schedule")}
+                      >
+                        <Calendar className="size-4" />
+                        РАСПИСАНИЕ
+                      </Button>
+                    </span>
+                  </span>
+                </span>
+              </div>
+            </div>
+          </section>
+        )
       )}
 
-      {/* Полоса «что на канале» — карточка-визитка dypaGPT */}
-      {main && !hero && (
-        <Section icon={SparklesIcon} title="Канал платформы">
-          <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {channels.map((c) => (
-              <LiveChannelCard key={c.slug} channel={c} />
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {/* Клипы — витрина-заглушка */}
+      {/* Клипы */}
       <Section
         icon={Clapperboard}
-        title="Популярные клипы"
+        title="КЛИПЫ"
         action={{ label: "ВСЕ КЛИПЫ", onClick: () => setView("clips") }}
       >
-        <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {clips === null
             ? [0, 1, 2, 3].map((i) => (
                 <div key={i} className="space-y-2">
-                  <Skeleton className="aspect-video w-full rounded-lg" />
-                  <Skeleton className="h-4 w-4/5" />
-                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="aspect-video w-full rounded-2xl" />
                 </div>
               ))
             : clips
@@ -138,19 +162,17 @@ export function HomeView() {
         </div>
       </Section>
 
-      {/* Записи — витрина-заглушка */}
+      {/* Записи */}
       <Section
         icon={Video}
-        title="Записи эфиров"
+        title="ЗАПИСИ ЭФИРОВ"
         action={{ label: "ВСЕ ЗАПИСИ", onClick: () => setView("recordings") }}
       >
-        <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {recordings === null
             ? [0, 1, 2].map((i) => (
                 <div key={i} className="space-y-2">
-                  <Skeleton className="aspect-video w-full rounded-lg" />
-                  <Skeleton className="h-4 w-4/5" />
-                  <Skeleton className="h-3 w-1/2" />
+                  <Skeleton className="aspect-video w-full rounded-2xl" />
                 </div>
               ))
             : recordings
@@ -159,32 +181,26 @@ export function HomeView() {
         </div>
       </Section>
 
-      {/* Расписание — витрина-заглушка */}
+      {/* Расписание */}
       <Section
         icon={Calendar}
-        title="Ближайшие эфиры"
+        title="БЛИЖАЙШИЕ ЭФИРЫ"
         action={{ label: "ВСЁ РАСПИСАНИЕ", onClick: () => setView("schedule") }}
       >
         <div className="space-y-2.5">
           {schedule === null
-            ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-20 w-full rounded-lg" />)
+            ? [0, 1, 2].map((i) => <Skeleton key={i} className="h-20 w-full rounded-2xl" />)
             : schedule
                 .slice(0, 3)
                 .map((entry) => <ScheduleRow key={entry.id} entry={entry} channel={bySlug(entry.channelSlug)} />)}
         </div>
       </Section>
 
-      {/* Футер-подпись главной */}
-      <footer className="border-t border-border pt-5 text-xs leading-relaxed text-muted-foreground/60">
+      {/* Футер главной */}
+      <footer className="border-t border-white/5 pt-5 text-xs leading-relaxed text-muted-foreground/60">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Gamepad2 className="size-4" aria-hidden />
-          <span className="label-caps text-[10px]">BACKSTAGE — приватные трансляции для платных подписчиков.</span>
-          <button
-            className="label-caps text-[10px] underline-offset-2 hover:text-primary hover:underline"
-            onClick={() => channels[0] && openChannel(channels[0].slug)}
-          >
-            ПЕРЕЙТИ К ЭФИРУ
-          </button>
+          <Sparkles className="size-4 text-primary/60" aria-hidden />
+          <span className="label-caps text-[10px]">BACKSTAGE — ПРИВАТНЫЕ ТРАНСЛЯЦИИ ДЛЯ ПЛАТНЫХ ПОДПИСЧИКОВ</span>
         </div>
       </footer>
     </div>
