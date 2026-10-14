@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
     if (action === "start") {
       announceToChat(channel.slug, `Демо-эфир запущен: ${channel.liveTitle ?? channel.name}`);
     } else {
-      announceToChat(channel.slug, "Демо-эфир завершён. Спасибо, что были с нами!");
+      announceToChat(channel.slug, "Демо-эфир завершён. Спасибо, что были с нами!", { clearPin: true });
     }
   }
 

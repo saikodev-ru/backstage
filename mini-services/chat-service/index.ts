@@ -31,6 +31,13 @@
  *    Twitch) + REST GET /api/chatters?channel=<slug>
  *  - демо-модераторы иногда пишут в чат, демо-присутствие слегка шевелится
  *
+ * v2.2 additions (закреплённые сообщения + цвет ника):
+ *  - команды модов /pin <id> [30|10s|5m|1h] и /unpin; событие chat:pin в
+ *    комнату канала { channelSlug, message: ChatMsg|null, until: number|null }
+ *  - GET /api/pin?channel=<slug>; вошедшему (channel:join) отдаётся текущий
+ *    пин; TTL-автоанпин (~5с, ensureBackground); POST /announce с clearPin
+ *  - override цвета ника: color (палитра Twitch) в chat:send и POST /api/send
+ *
  * Everything lives in this single file on purpose.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
@@ -45,7 +52,7 @@ import { Database } from 'bun:sqlite'
 // ---------------------------------------------------------------------------
 
 const PORT = 3003 // hardcoded: gateway forwards via XTransformPort=3003, do not change
-const SERVICE_VERSION = '2.1.2' // badges + chatters:update + /api/chatters
+const SERVICE_VERSION = '2.2.0' // pins (/pin /unpin, chat:pin, /api/pin) + color override
 const CHAT_SECRET = process.env.CHAT_SECRET || 'backstage-dev-chat-secret-2024'
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || 'backstage-internal-2024'
 const MAIN_APP_BASE = 'http://127.0.0.1:3000'
@@ -60,10 +67,14 @@ const EMOTES_REFRESH_MS = 6 * 60 * 60 * 1000
 const EMOTE_FETCH_TIMEOUT_MS = 8000
 const CHANNELS_CACHE_MS = 30_000 // /api/channels cache for !uptime / !title
 const BANS_CLEANUP_MS = 60_000
+const PIN_TTL_CHECK_MS = 5_000 // v2.2: период проверки истёкших /pin-ов (TTL-автоанпин)
 
 const SEVEN_TV_URL = 'https://7tv.io/v3/emote-sets/global'
 const BTTV_URL = 'https://api.betterttv.net/3/cached/emotes/global'
 const FFZ_URL = 'https://api.frankerfacez.com/v1/set/global'
+
+/** v2.2: палитра цветов ника как в Twitch — допустимые значения color в chat:send / /api/send. */
+const TWITCH_PALETTE = ['#ff7bac','#7bd3ff','#a970ff','#ffb86b','#c3e88d','#8be9fd','#f97ac0','#d6bcff','#5ad1a4','#ff8080','#a6e22e','#f78c6c','#e6db74','#fd971f','#7f7fff','#00b5ad']
 
 // ---------------------------------------------------------------------------
 // Types
@@ -435,6 +446,22 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
     return
   }
 
+  // --- GET /api/pin?channel=slug (закреплённое сообщение канала; v2.2) ---
+  if (pathname === '/api/pin') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const channel = requestParams(req).get('channel') ?? ''
+    if (channel.length === 0) {
+      sendJson(res, 400, { ok: false, error: 'bad_request', message: 'channel is required' })
+      return
+    }
+    const pin = pins.get(channel)
+    sendJson(res, 200, { ok: true, message: pin ? pin.message : null, until: pin ? pin.until : null })
+    return
+  }
+
   // --- POST /api/send (OBS / bots): Bearer chat-token + {channelSlug, text} ---
   if (pathname === '/api/send') {
     if (req.method !== 'POST') {
@@ -455,7 +482,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
       sendJson(res, 413, { ok: false, error: 'payload too large' })
       return
     }
-    let parsed: { channelSlug?: unknown; text?: unknown }
+    let parsed: { channelSlug?: unknown; text?: unknown; color?: unknown }
     try {
       parsed = JSON.parse(raw.length > 0 ? raw : '{}')
     } catch {
@@ -468,7 +495,8 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
       sendJson(res, 400, { ok: false, error: 'bad_request', message: 'channelSlug и text обязательны' })
       return
     }
-    const result = await processChatText(channelSlug, user, text, null)
+    const color = paletteColor(parsed.color) // v2.2: override цвета ника (палитра Twitch)
+    const result = await processChatText(channelSlug, user, text, null, color)
     if (!result.ok) {
       sendJson(res, result.status ?? 400, {
         ok: false,
@@ -524,7 +552,7 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
     sendJson(res, 413, { ok: false, error: 'payload too large' })
     return
   }
-  let parsed: { secret?: unknown; channelSlug?: unknown; text?: unknown; ts?: unknown }
+  let parsed: { secret?: unknown; channelSlug?: unknown; text?: unknown; ts?: unknown; clearPin?: unknown }
   try {
     parsed = JSON.parse(raw.length > 0 ? raw : '{}')
   } catch {
@@ -537,7 +565,18 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
   }
   const channelSlug = parsed.channelSlug
   const text = typeof parsed.text === 'string' ? parsed.text.trim() : ''
-  if (typeof channelSlug !== 'string' || channelSlug.length === 0 || text.length === 0) {
+  const clearPin = parsed.clearPin === true // v2.2: снять закреплённое сообщение (основное приложение зовёт при завершении эфира)
+  if (typeof channelSlug !== 'string' || channelSlug.length === 0) {
+    sendJson(res, 400, { ok: false, error: 'channelSlug and text are required' })
+    return
+  }
+  if (clearPin) clearChannelPin(channelSlug)
+  if (text.length === 0) {
+    // announce без текста допустим только как «снять пин» (clearPin), иначе — прежняя ошибка
+    if (clearPin) {
+      sendJson(res, 200, { ok: true, clearedPin: true })
+      return
+    }
     sendJson(res, 400, { ok: false, error: 'channelSlug and text are required' })
     return
   }
@@ -612,6 +651,9 @@ const history = new Map<string, ChatMsg[]>() // channelSlug -> last 100 messages
 const lastSentAt = new Map<string, number>() // uid -> ts of last accepted message
 const lastReportedViewers = new Map<string, number>() // channelSlug -> last reported count
 
+/** v2.2: закреплённые сообщения (in-memory): channelSlug -> { message, until } (until=null → до конца эфира). */
+const pins = new Map<string, { message: ChatMsg; until: number | null }>()
+
 function roomKey(slug: string): string {
   return 'ch:' + slug
 }
@@ -631,6 +673,13 @@ function appendHistory(slug: string, message: ChatMsg): void {
 /** History visible to clients (deleted messages are hidden). */
 function visibleHistory(slug: string): ChatMsg[] {
   return (history.get(slug) ?? []).filter((m) => !m.deleted)
+}
+
+/** v2.2: снять закреплённое сообщение канала и разослать chat:pin (message=null → анпин). */
+function clearChannelPin(slug: string): boolean {
+  if (!pins.delete(slug)) return false
+  io.in(roomKey(slug)).emit('chat:pin', { channelSlug: slug, message: null, until: null })
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -697,6 +746,13 @@ function userBadges(user: ChatUser, role: Role): string[] {
   else if (role === 'MOD') badges.push('mod')
   if (user.sub) badges.push('sub')
   return badges
+}
+
+/** v2.2: цвет ника из палитры Twitch, если валиден; иначе undefined → остаётся цвет юзера. */
+function paletteColor(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const c = raw.toLowerCase()
+  return TWITCH_PALETTE.includes(c) ? c : undefined
 }
 
 /** Фиксированные демо-модераторы (главный мод — сам dypaGPT, это его помощники). */
@@ -930,7 +986,7 @@ function commandsListText(): string {
   const all = custom.length > 0 ? base.concat(custom) : base
   return (
     `Команды чата: ${all.join(' · ')}. ` +
-    'Модераторам: /ban, /unban, /timeout, /untimeout, /clear, /slow, /slowoff, /subsonly, /so, /delete, /mod, /unmod, /cmd, /demo'
+    'Модераторам: /ban, /unban, /timeout, /untimeout, /clear, /slow, /slowoff, /subsonly, /so, /delete, /pin, /unpin, /mod, /unmod, /cmd, /demo'
   )
 }
 
@@ -1107,6 +1163,30 @@ async function cmdDelete(ctx: CmdCtx): Promise<CmdResult | void> {
   io.in(roomKey(ctx.channel)).emit('chat:delete', { channelSlug: ctx.channel, ids: [id] })
 }
 
+async function cmdPin(ctx: CmdCtx): Promise<CmdResult | void> {
+  const id = ctx.args[0]
+  const durRaw = ctx.args[1]
+  if (!id) return cmdError('bad_args', 'Использование: /pin <id сообщения> [длительность: 30, 10s, 5m, 1h]')
+  const list = history.get(ctx.channel) ?? []
+  const msg = list.find((m) => m.id === id)
+  if (!msg || msg.deleted) return cmdError('not_found', 'Сообщение не найдено', 404)
+  let until: number | null = null // null = до конца эфира
+  if (durRaw) {
+    const dur = parseDuration(durRaw)
+    if (!dur) return cmdError('bad_args', 'Не понял длительность. Примеры: 30, 10s, 5m, 1h')
+    until = Date.now() + dur * 1000
+  }
+  const pinned: ChatMsg = { ...msg } // копия: /delete или /clear исходного не ломает баннер
+  pins.set(ctx.channel, { message: pinned, until })
+  io.in(roomKey(ctx.channel)).emit('chat:pin', { channelSlug: ctx.channel, message: pinned, until })
+  emitSystem(ctx.channel, `Закреплено сообщение от ${pinned.name}`)
+}
+
+async function cmdUnpin(ctx: CmdCtx): Promise<CmdResult | void> {
+  if (!pins.has(ctx.channel)) return cmdError('no_pin', 'Сообщение не закреплено')
+  clearChannelPin(ctx.channel)
+}
+
 async function cmdMod(ctx: CmdCtx): Promise<CmdResult | void> {
   const target = ctx.args[0]
   if (!target) return cmdError('bad_args', 'Использование: /mod <ник>')
@@ -1182,6 +1262,8 @@ const MOD_COMMANDS: Record<string, (ctx: CmdCtx) => Promise<CmdResult | void>> =
   subsonly: cmdSubsonly,
   so: cmdShoutout,
   delete: cmdDelete,
+  pin: cmdPin,
+  unpin: cmdUnpin,
   mod: cmdMod,
   unmod: cmdUnmod,
   cmd: cmdCustom,
@@ -1281,6 +1363,7 @@ async function processChatText(
   user: ChatUser,
   text: string,
   socket: Socket | null,
+  color?: string, // v2.2: валидированный цвет ника (палитра Twitch); отсутствует → цвет юзера
 ): Promise<PipelineResult> {
   // 1. ban / active timeout
   const ban = getActiveBan(user.uid)
@@ -1333,7 +1416,7 @@ async function processChatText(
     channelSlug: channel,
     uid: user.uid,
     name: user.name,
-    color: user.color,
+    color: color ?? user.color, // v2.2: override цвета ника из палитры Twitch
     avatar: user.avatar,
     text,
     ts: now,
@@ -1643,6 +1726,9 @@ io.on('connection', (socket) => {
     socket.join(roomKey(channelSlug))
     socket.data.channel = channelSlug
     socket.emit('chat:history', { channelSlug, messages: visibleHistory(channelSlug) })
+    // v2.2: вошедшему сразу отдаём текущее закреплённое сообщение канала (если есть)
+    const pin = pins.get(channelSlug)
+    if (pin) socket.emit('chat:pin', { channelSlug, message: pin.message, until: pin.until })
     io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
     broadcastChatters(channelSlug) // сразу присылаем «кто в чате» вошедшему
   })
@@ -1657,7 +1743,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('chat:send', (raw: unknown) => {
-    const payload = raw as { channelSlug?: unknown; text?: unknown } | null
+    const payload = raw as { channelSlug?: unknown; text?: unknown; color?: unknown } | null
     const user = socket.data.user as ChatUser | null
     if (!user) {
       socket.emit('system:error', { code: 'auth_required', message: 'Войдите через Telegram, чтобы писать в чат' })
@@ -1667,7 +1753,8 @@ io.on('connection', (socket) => {
     if (typeof channelSlug !== 'string' || channelSlug.length === 0) return
     if (socket.data.channel !== channelSlug) return // must be a room member
     const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
-    processChatText(channelSlug, user, text, socket)
+    const color = paletteColor(payload?.color) // v2.2: override цвета ника (палитра Twitch)
+    processChatText(channelSlug, user, text, socket, color)
       .then((result) => {
         if (!result.ok && result.code) {
           socket.emit('system:error', { code: result.code, message: result.message })
@@ -1726,7 +1813,7 @@ function startViewersTimer(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Background jobs: emotes refresh (6h), expired bans cleanup (60s)
+// Background jobs: emotes refresh (6h), expired bans cleanup (60s), pin TTL (5s)
 //
 // ВАЖНО: bun --hot не сохраняет таймеры, созданные при пере-исполнении модуля
 // (после хот-релоада они молча умирают). Поэтому все фоновые интервалы ставятся
@@ -1751,6 +1838,17 @@ function startMaintenanceTimers(): void {
 
 let backgroundArmed = false
 
+/** v2.2: TTL закреплённых сообщений — раз в ~5с снимаем истёкшие пины (анпин + broadcast). */
+function startPinTtlTimer(): void {
+  setInterval(() => {
+    const now = Date.now()
+    for (const [slug, pin] of pins) {
+      if (pin.until === null || pin.until > now) continue
+      clearChannelPin(slug)
+    }
+  }, PIN_TTL_CHECK_MS)
+}
+
 /** Идемпотентное (пере)вооружение всех фоновых таймеров сервиса. */
 function ensureBackground(): void {
   if (backgroundArmed) return
@@ -1762,6 +1860,7 @@ function ensureBackground(): void {
   startChattersTimer()
   startViewersTimer()
   startMaintenanceTimers()
+  startPinTtlTimer()
 }
 
 // ВАЖНО: вызов ensureBackground() при оценке модуля убран сознательно —

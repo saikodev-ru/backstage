@@ -72,6 +72,7 @@ export function VideoPlayer({
   lockTitle,
   lockDescription,
   lockChildren,
+  liveStartedAt,
 }: {
   src: string | null;
   poster?: string | null;
@@ -81,6 +82,8 @@ export function VideoPlayer({
   lockTitle?: string;
   lockDescription?: string;
   lockChildren?: React.ReactNode;
+  /** ISO-старт эфира — плеер показывает живой таймер H:MM:SS вместо LIVE */
+  liveStartedAt?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -94,6 +97,29 @@ export function VideoPlayer({
   const [currentQuality, setCurrentQuality] = useState(-1);
   const [isLive, setIsLive] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "error" | "no-source">("loading");
+  const [uptime, setUptime] = useState<string | null>(null);
+
+  // ── Живой таймер эфира (H:MM:SS, тикает каждую секунду) ───────────────
+  useEffect(() => {
+    const startedAtMs = liveStartedAt ? new Date(liveStartedAt).getTime() : NaN;
+    if (!Number.isFinite(startedAtMs)) return;
+    const tick = () => {
+      const sec = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      const mm = String(m).padStart(2, "0");
+      const ss = String(s).padStart(2, "0");
+      setUptime(h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`);
+    };
+    // первый тик и перевооружение — через макротаску (без синхронного setState в эффекте)
+    const t0 = window.setTimeout(tick, 0);
+    const t = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearInterval(t);
+    };
+  }, [liveStartedAt]);
 
   // ── Инициализация HLS ───────────────────────────────────────────────────
   useEffect(() => {
@@ -409,9 +435,12 @@ export function VideoPlayer({
                 onClick={seekToLive}
                 className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold text-white transition-colors hover:bg-white/15"
                 aria-label="Перейти к живому эфиру"
+                title={uptime ? `В эфире ${uptime}` : "В эфире"}
               >
                 <span className="size-1.5 rounded-full bg-live live-dot" aria-hidden />
-                LIVE
+                <span className="font-mono tabular-nums tracking-tight">
+                  {liveStartedAt ? (uptime ?? "LIVE") : "LIVE"}
+                </span>
               </button>
             )}
 

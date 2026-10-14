@@ -15,6 +15,7 @@ import { RecordingsView } from "@/components/backstage/views/recordings-view";
 import { ScheduleView } from "@/components/backstage/views/schedule-view";
 import { CollabsView } from "@/components/backstage/views/collabs-view";
 import { SettingsView } from "@/components/backstage/views/settings-view";
+import { ChannelView } from "@/components/backstage/views/channel-view";
 import { AuthDialog } from "@/components/backstage/auth-dialog";
 import { AdminPanel } from "@/components/backstage/admin-panel";
 import type { PublicChannel, PublicUser } from "@/lib/types";
@@ -67,29 +68,36 @@ function LiveTicker({ channel }: { channel: PublicChannel }) {
 }
 
 function Shell() {
-  const { view, activeChannel, openChannel, channels } = useBackstageStore();
+  const { view, activeChannel, openChannel, openChannelPage, channels } = useBackstageStore();
   useChannels(); // polling каналов + конфиг авторизации
 
-  // Hash-роутинг: #ch-<slug> (шаринг ссылки на канал)
+  // Hash-роутинг: #ch-<slug> (эфир), #chp-<slug> (страница канала) — шаринг ссылок
   useEffect(() => {
     const applyHash = () => {
-      const m = window.location.hash.match(/^#ch-([a-z0-9-]+)$/i);
-      if (m) {
-        const slug = m[1];
-        if (channels.some((c) => c.slug === slug)) {
-          openChannel(slug);
-        }
+      const mLive = window.location.hash.match(/^#ch-([a-z0-9-]+)$/i);
+      const mPage = window.location.hash.match(/^#chp-([a-z0-9-]+)$/i);
+      if (mLive) {
+        const slug = mLive[1];
+        if (channels.some((c) => c.slug === slug)) openChannel(slug);
+      } else if (mPage) {
+        const slug = mPage[1];
+        if (channels.some((c) => c.slug === slug)) openChannelPage(slug);
       }
     };
     applyHash();
     window.addEventListener("hashchange", applyHash);
     return () => window.removeEventListener("hashchange", applyHash);
-  }, [channels, openChannel]);
+  }, [channels, openChannel, openChannelPage]);
 
   // Поддержка адресной строки при переключении каналов
   useEffect(() => {
     if (view === "live" && activeChannel) {
       const hash = `#ch-${activeChannel}`;
+      if (window.location.hash !== hash) {
+        window.history.replaceState(null, "", hash);
+      }
+    } else if (view === "channel" && activeChannel) {
+      const hash = `#chp-${activeChannel}`;
       if (window.location.hash !== hash) {
         window.history.replaceState(null, "", hash);
       }
@@ -115,6 +123,7 @@ function Shell() {
           {view === "schedule" && <ScheduleView />}
           {view === "collabs" && <CollabsView />}
           {view === "settings" && <SettingsView />}
+          {view === "channel" && <ChannelView />}
         </main>
       </div>
       <MobileNav />

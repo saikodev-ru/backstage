@@ -7,7 +7,15 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import type { PublicChannel, PublicUser } from "@/lib/types";
 
-export type View = "live" | "home" | "clips" | "recordings" | "collabs" | "schedule" | "settings";
+export type View =
+  | "live"
+  | "home"
+  | "clips"
+  | "recordings"
+  | "collabs"
+  | "schedule"
+  | "settings"
+  | "channel";
 
 type AppState = {
   view: View;
@@ -19,6 +27,8 @@ type AppState = {
 
   setView: (v: View) => void;
   openChannel: (slug: string) => void;
+  /** Страница канала (баннер/аватар/описание) — как в Twitch */
+  openChannelPage: (slug: string) => void;
   setUser: (u: PublicUser | null) => void;
   setChannels: (c: PublicChannel[]) => void;
   patchChannel: (slug: string, patch: Partial<PublicChannel>) => void;
@@ -39,6 +49,7 @@ function createBackstageStore(initial: { channels: PublicChannel[]; user: Public
 
     setView: (view) => set({ view }),
     openChannel: (slug) => set({ view: "live", activeChannel: slug }),
+    openChannelPage: (slug) => set({ view: "channel", activeChannel: slug }),
     setUser: (user) => set({ user }),
     setChannels: (channels) => set({ channels }),
     patchChannel: (slug, patch) =>

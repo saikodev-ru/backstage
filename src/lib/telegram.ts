@@ -88,13 +88,14 @@ export async function checkTelegramSubscription(
   }
 }
 
-/** Уведомление чат-сервиса о системном сообщении (начало/конец эфира и т.п.) */
-export async function announceToChat(channelSlug: string, text: string) {
+/** Уведомление чат-сервиса о системном сообщении (начало/конец эфира и т.п.).
+ * clearPin — снять закреплённое сообщение (например, при завершении эфира). */
+export async function announceToChat(channelSlug: string, text: string, opts?: { clearPin?: boolean }) {
   try {
     await fetch("http://127.0.0.1:3003/announce", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ secret: INTERNAL_SECRET, channelSlug, text }),
+      body: JSON.stringify({ secret: INTERNAL_SECRET, channelSlug, text, clearPin: opts?.clearPin ?? false }),
     });
   } catch {
     // чат-сервис может быть недоступен — не критично

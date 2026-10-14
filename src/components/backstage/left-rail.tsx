@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { findCategory } from "@/lib/categories";
 import { useBackstageStore, type View } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
 import type { PublicChannel } from "@/lib/types";
@@ -273,8 +274,11 @@ function ChannelCard({ channel }: { channel: PublicChannel }) {
                 {channel.liveTitle ?? channel.name}
               </span>
               <span className="flex items-center justify-between gap-2">
-                <span className="truncate text-[11px] text-muted-foreground/70">
-                  {channel.liveCategory ?? "—"}
+                <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground/70">
+                  {(() => {
+                    const cat = findCategory(channel.liveCategory);
+                    return cat ? `${cat.emoji} ${cat.name}` : (channel.liveCategory ?? "—");
+                  })()}
                 </span>
                 <LiveViewers viewers={channel.viewers} className="text-[11px] leading-none" />
               </span>

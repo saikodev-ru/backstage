@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { CategoryPicker } from "@/components/backstage/category-picker";
 import { useBackstageStore } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -501,8 +502,8 @@ export function AdminPanel() {
                 <Input id="a-title" value={draft.liveTitle} onChange={(e) => setDraft({ liveTitle: e.target.value })} placeholder="О чём эфир" className="bg-[#1a1a21]" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="a-cat">Категория</Label>
-                <Input id="a-cat" value={draft.liveCategory} onChange={(e) => setDraft({ liveCategory: e.target.value })} placeholder="Например: Разработка" className="bg-[#1a1a21]" />
+                <Label className="label-caps text-[11px] text-muted-foreground">КАТЕГОРИЯ</Label>
+                <CategoryPicker value={draft.liveCategory} onChange={(slug) => setDraft({ liveCategory: slug })} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="a-tags">Теги (через запятую)</Label>

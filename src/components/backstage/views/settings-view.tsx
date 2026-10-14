@@ -4,7 +4,7 @@
 // баннер, слоган) и трансляция (адрес сервера, ключ трансляции, режим чата —
 // заглушка). Доступ: шестерёнка в топбаре / пункт профиля (только ADMIN).
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -14,11 +14,13 @@ import {
   Image as ImageIcon,
   KeyRound,
   Link2,
+  Loader2,
   MessageSquare,
   Palette,
   RefreshCcw,
   Server,
   Type,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,8 +30,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import { CategoryPicker } from "@/components/backstage/category-picker";
 import { useBackstageStore } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
+import { findCategory } from "@/lib/categories";
 import type { PublicChannel } from "@/lib/types";
 
 /* ── Небольшие строительные блоки страницы ─────────────────────────────── */
@@ -78,6 +82,66 @@ function Field({
       </div>
       {children}
     </div>
+  );
+}
+
+const UPLOAD_MAX_SIZE = 5 * 1024 * 1024; // 5 МБ (синхронизировано с /api/upload)
+
+/** Кнопка «загрузить файл» (label + скрытый input file) → POST /api/upload */
+function UploadButton({ onUploaded, label = "ЗАГРУЗИТЬ" }: { onUploaded: (url: string) => void; label?: string }) {
+  const inputId = useId();
+  const [uploading, setUploading] = useState(false);
+
+  const pick = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Только изображения", description: "jpg / png / webp / gif", variant: "destructive" });
+      return;
+    }
+    if (file.size > UPLOAD_MAX_SIZE) {
+      toast({ title: "Файл больше 5 МБ", description: "Выберите изображение поменьше", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    void (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = (await res.json().catch(() => ({}))) as { url?: string; message?: string };
+        if (!res.ok || !data.url) throw new Error(data.message ?? `HTTP ${res.status}`);
+        onUploaded(data.url);
+        toast({ title: "Файл загружен", description: "Нажмите «Сохранить», чтобы применить" });
+      } catch (e) {
+        toast({ title: "Ошибка загрузки", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+      } finally {
+        setUploading(false);
+      }
+    })();
+  };
+
+  return (
+    <label
+      htmlFor={inputId}
+      className={cn(
+        "label-caps h-9 flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-white/[.04] px-3 text-[11px] hover:bg-white/[.08]",
+        uploading && "pointer-events-none opacity-60"
+      )}
+    >
+      {uploading ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <Upload className="size-3.5" aria-hidden />}
+      {uploading ? "ЗАГРУЖАЕМ…" : label}
+      <input
+        id={inputId}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        disabled={uploading}
+        onChange={(e) => {
+          pick(e.target.files?.[0]);
+          e.target.value = ""; // чтобы можно было выбрать тот же файл повторно
+        }}
+      />
+    </label>
   );
 }
 
@@ -160,6 +224,11 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
   const [tagline, setTagline] = useState(channel.tagline ?? "");
   const [avatarUrl, setAvatarUrl] = useState(channel.avatarUrl ?? "");
   const [bannerUrl, setBannerUrl] = useState(channel.bannerUrl ?? "");
+  // Категория хранится как slug; легаси-значения (напр. «Just Chatting»)
+  // нормализуются к современному slug — иначе плитки не подсветятся.
+  const [category, setCategory] = useState(
+    channel.liveCategory ? (findCategory(channel.liveCategory)?.slug ?? channel.liveCategory) : ""
+  );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -194,6 +263,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           tagline: tagline.trim() || null,
           avatarUrl: avatarUrl.trim() || null,
           bannerUrl: bannerUrl.trim() || null,
+          liveCategory: category || null,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as { channel?: PublicChannel; message?: string };
@@ -205,6 +275,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           tagline: data.channel.tagline,
           avatarUrl: data.channel.avatarUrl,
           bannerUrl: data.channel.bannerUrl,
+          liveCategory: data.channel.liveCategory,
         });
       }
       setDirty(false);
@@ -287,17 +358,23 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
             <Input value={tagline} onChange={(e) => patch("tagline", e.target.value)} maxLength={80} placeholder="Короткая строка под именем канала" />
           </Field>
 
-          <Field label="АВАТАР (URL)" hint="jpg / png / webp">
-            <div className="relative">
-              <ImageIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input value={avatarUrl} onChange={(e) => patch("avatarUrl", e.target.value)} className="pl-9" placeholder="https://…/avatar.png" inputMode="url" />
+          <Field label="АВАТАР (URL)" hint="jpg / png / webp · до 5 МБ">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <ImageIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input value={avatarUrl} onChange={(e) => patch("avatarUrl", e.target.value)} className="pl-9" placeholder="https://…/avatar.png" inputMode="url" />
+              </div>
+              <UploadButton onUploaded={(url) => patch("avatarUrl", url)} />
             </div>
           </Field>
 
-          <Field label="БАННЕР (URL)" hint="широкое изображение 16:9">
-            <div className="relative">
-              <ImageIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input value={bannerUrl} onChange={(e) => patch("bannerUrl", e.target.value)} className="pl-9" placeholder="https://…/banner.jpg" inputMode="url" />
+          <Field label="БАННЕР (URL)" hint="широкое изображение 16:9 · до 5 МБ">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <ImageIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input value={bannerUrl} onChange={(e) => patch("bannerUrl", e.target.value)} className="pl-9" placeholder="https://…/banner.jpg" inputMode="url" />
+              </div>
+              <UploadButton onUploaded={(url) => patch("bannerUrl", url)} />
             </div>
           </Field>
 
@@ -359,6 +436,16 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
                 СБРОСИТЬ
               </Button>
             </div>
+          </Field>
+
+          <Field label="КАТЕГОРИЯ ЭФИРА" hint="показывается под трансляцией">
+            <CategoryPicker
+              value={category}
+              onChange={(slug) => {
+                setDirty(true);
+                setCategory(slug);
+              }}
+            />
           </Field>
 
           <Field label="РЕЖИМ ЧАТА" hint="скоро">

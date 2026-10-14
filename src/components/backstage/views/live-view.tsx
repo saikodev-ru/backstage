@@ -44,8 +44,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { findCategory } from "@/lib/categories";
 import { useBackstageStore } from "@/components/backstage/store";
-import { useAuthActions, useContent, formatCount, formatUptime } from "@/components/backstage/hooks";
+import { useAuthActions, useContent, formatCount } from "@/components/backstage/hooks";
 import { VideoPlayer } from "@/components/backstage/video-player";
 import { ChatPanel } from "@/components/backstage/chat-panel";
 import { toast } from "@/hooks/use-toast";
@@ -160,7 +161,7 @@ function ChatResizeHandle({
 
 /* ── Бесплатная подписка («Отслеживать») — локальный флаг ─────────────── */
 
-function useFollow(slug: string) {
+export function useFollow(slug: string) {
   const [followed, setFollowed] = useState(false);
 
   useEffect(() => {
@@ -199,9 +200,9 @@ function useFollow(slug: string) {
   return { followed, toggle };
 }
 
-/* ── Диалог платной подписки ──────────────────────────────────────────── */
+/* ── Диалог платной подписки ────────────────────────────────────── */
 
-function SubscribeDialog({
+export function SubscribeDialog({
   channel,
   open,
   onOpenChange,
@@ -562,7 +563,7 @@ function PanelCard({ panel }: { panel: ChannelPanelDto }) {
   );
 }
 
-function AboutSection({ channel }: { channel: PublicChannel }) {
+export function AboutSection({ channel }: { channel: PublicChannel }) {
   const user = useBackstageStore((s) => s.user);
   const patchChannel = useBackstageStore((s) => s.patchChannel);
   const isAdmin = user?.role === "ADMIN";
@@ -650,7 +651,7 @@ function AboutSection({ channel }: { channel: PublicChannel }) {
 /* ── Экран эфира ───────────────────────────────────────────────────────── */
 
 export function LiveView() {
-  const { user, channels, activeChannel, setAuthOpen, setView } = useBackstageStore();
+  const { user, channels, activeChannel, setAuthOpen, setView, openChannelPage } = useBackstageStore();
   const { verifySubscription } = useAuthActions();
   const channel = channels.find((c) => c.slug === activeChannel) ?? channels[0];
   const schedule = useContent<ScheduleDto>("schedule");
@@ -683,8 +684,9 @@ export function LiveView() {
     channel.isLive && (channel.access === "public" || user?.isSubscriber || user?.role === "ADMIN");
   const needsLogin = isPrivateLive && !user;
   const needsSub = isPrivateLive && user && !user.isSubscriber && user.role !== "ADMIN";
-  const uptime = formatUptime(channel.liveStartedAt);
   const subLink = channel.telegramLink ?? "https://t.me";
+  const category = findCategory(channel.liveCategory);
+  const viewCount = formatCount(Math.max(channel.viewers, 1));
 
   const share = async () => {
     const url = `${window.location.origin}${window.location.pathname}#ch-${channel.slug}`;
@@ -705,6 +707,7 @@ export function LiveView() {
           <VideoPlayer
             src={canWatch ? (channel.hlsUrl ?? null) : "locked-placeholder"}
             locked={!canWatch}
+            liveStartedAt={channel.liveStartedAt}
             poster={channel.livePreviewUrl ?? channel.bannerUrl}
             posterAccent="#6f6f78"
             posterLabel={channel.name}
@@ -802,15 +805,28 @@ export function LiveView() {
 
         {/* ── Инфо-бар в стиле Twitch (без фона и контуров) ── */}
         <div className="fade-up flex flex-wrap items-start gap-x-4 gap-y-3 px-3 pb-5 pt-4 sm:px-4">
-          {/* Аватар: красный контур + плашка LIVE под контуром (если онлайн) */}
-          <div className="relative shrink-0 self-start pb-2.5 pr-1 pt-1" aria-hidden={false}>
-            <span className={cn("relative block rounded-full p-[2.5px]", channel.isLive ? "bg-live" : "bg-white/25")}>
-              <Avatar className="size-12 rounded-full sm:size-14">
-                <AvatarImage src={channel.avatarUrl ?? undefined} alt={channel.name} />
-                <AvatarFallback className="rounded-full bg-[#1c1c21] text-xl font-black text-[#d6d6de]">
-                  {channel.name.slice(0, 1).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
+          {/* Аватар: толстое кольцо (live — красное) + плашка LIVE под кольцом.
+              Клик — страница канала (как в Twitch) */}
+          <div className="relative shrink-0 self-start pb-2.5 pr-1 pt-1">
+            <span
+              className={cn(
+                "grid place-items-center rounded-full p-1",
+                channel.isLive ? "bg-live" : "bg-white/25"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => openChannelPage(channel.slug)}
+                aria-label={`Страница канала ${channel.name}`}
+                className="block rounded-full outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              >
+                <Avatar className="size-12 rounded-full sm:size-14">
+                  <AvatarImage src={channel.avatarUrl ?? undefined} alt={channel.name} />
+                  <AvatarFallback className="rounded-full bg-[#1c1c21] text-xl font-black text-[#d6d6de]">
+                    {channel.name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </button>
             </span>
             {channel.isLive && (
               <span
@@ -823,24 +839,36 @@ export function LiveView() {
             )}
           </div>
 
-          {/* Заголовок → никнейм → категория и теги */}
+          {/* Заголовок → никнейм (клик — страница канала) → категория и теги.
+              Название трансляции НЕ пропадает после завершения эфира */}
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-extrabold sm:text-lg">
-              {channel.isLive ? (channel.liveTitle ?? channel.name) : `${channel.name}`}
+              {channel.liveTitle ?? channel.name}
             </h1>
-            <p className="mt-0.5 text-sm font-bold text-foreground/90">{channel.name}</p>
+            <button
+              type="button"
+              onClick={() => openChannelPage(channel.slug)}
+              className="mt-0.5 text-sm font-bold text-foreground/90 transition-colors hover:text-foreground hover:underline"
+            >
+              {channel.name}
+            </button>
             <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
               {channel.liveCategory && (
-                <span className="rounded-full bg-white/10 px-2.5 py-0.5 font-semibold text-foreground/80">
-                  {channel.liveCategory}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => openChannelPage(channel.slug)}
+                  title="Категория"
+                  className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 font-semibold text-foreground/80 transition-colors hover:bg-white/15"
+                >
+                  {category && <span aria-hidden className="text-[13px] leading-none">{category.emoji}</span>}
+                  {category?.name ?? channel.liveCategory}
+                </button>
               )}
-              {channel.isLive &&
-                channel.liveTags.slice(0, 4).map((t) => (
-                  <span key={t} className="rounded-full bg-white/[.06] px-2.5 py-0.5">
-                    {t}
-                  </span>
-                ))}
+              {channel.liveTags.slice(0, 4).map((t) => (
+                <span key={t} className="rounded-full bg-white/[.06] px-2.5 py-0.5">
+                  {t}
+                </span>
+              ))}
               {!channel.isLive && channel.tagline && <span className="truncate">{channel.tagline}</span>}
               {channel.access === "private" && (
                 <span
@@ -900,17 +928,14 @@ export function LiveView() {
               </Button>
             </div>
 
-            <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-[13px]">
               {channel.isLive ? (
                 <>
-                  <Eye className="size-4" aria-hidden />
-                  <span className="font-bold tabular-nums text-foreground/90">
-                    {formatCount(Math.max(channel.viewers, 1))}
-                  </span>
-                  {uptime && <span className="text-xs">· {uptime} в эфире</span>}
+                  <Eye className="size-4 text-live" aria-hidden />
+                  <span className="font-bold tabular-nums text-live">{viewCount}</span>
                 </>
               ) : (
-                <span className="label-caps text-[11px]">ОФЛАЙН</span>
+                <span className="label-caps text-[11px] text-muted-foreground">ОФЛАЙН</span>
               )}
             </div>
           </div>

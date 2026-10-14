@@ -133,7 +133,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (!wasLive && willBeLive) {
       announceToChat(slug, `Эфир начался: ${updated.liveTitle ?? updated.name}`);
     } else if (wasLive && !willBeLive) {
-      announceToChat(slug, "Эфир завершён. Спасибо, что были с нами!");
+      announceToChat(slug, "Эфир завершён. Спасибо, что были с нами!", { clearPin: true });
     }
   }
 
