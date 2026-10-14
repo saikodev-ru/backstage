@@ -60,6 +60,11 @@ model Channel {
   // Привязка к инстансу Owncast (стриминг-движок): один канал = один движок.
   // Пусто → используется OWNCast_URL из окружения (дефолтный инстанс).
   owncastBaseUrl String?
+  // Доступ к эфиру: public (вещание публично) | private (гейт по подписке)
+  access          String    @default("private")
+  // Какой Telegram-канал должен быть в подписках зрителя (для private-эфиров).
+  // null → используется основной чат из TELEGRAM_CHAT_ID (env)
+  requiredTelegramChatId String?
   // Состояние эфира
   isLive         Boolean   @default(false)
   liveTitle      String?
@@ -78,6 +83,19 @@ model Channel {
 }
 
 // ─── Чат (архив сообщений, пишет chat-сервис) ─────────────────────────────
+
+// ─── Реестр Telegram-каналов (приватные каналы платных подписок) ──────────
+// Пул, из которого админ выбирает «какой ТГК нужен в подписках» для private-эфира.
+model TelegramChannel {
+  id        String   @id @default(cuid())
+  title     String
+  // chat id приватного канала (число) или @username; пусто → основной из env
+  chatId    String   @default("")
+  link      String?
+  note      String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
 
 model ChatMessage {
   id          String   @id @default(cuid())

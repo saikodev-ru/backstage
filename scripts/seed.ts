@@ -43,12 +43,23 @@ async function main() {
     livePreviewUrl: "/img/dypagpt/live.png",
     hlsUrl: null, // HLS отдаётся через прокси /api/stream/hls/stream.m3u8
     owncastBaseUrl: null, // привязан к дефолтному инстансу Owncast (OWNCAST_URL)
+    access: "private", // приватный платный эфир; админ может переключать на public
+    requiredTelegramChatId: null, // ТГК для подписки выбирается в пульте из реестра
     followers: 24813,
     viewers: 0,
     sortOrder: 0,
   };
 
   await db.channel.upsert({ where: { slug: channel.slug }, create: channel, update: channel });
+
+  // ── Реестр Telegram-каналов платных подписок ──────────────────────────
+  await db.telegramChannel.deleteMany({});
+  await db.telegramChannel.createMany({
+    data: [
+      { title: "dypaGPT · Приватный", chatId: "", link: "https://t.me/dypaGPT", note: "Основной канал (из настро env)", sortOrder: 0 },
+      { title: "dypaGPT+ · Закулисье", chatId: "", link: "https://t.me/dypaGPT_plus", note: "Второй уровень: записи и бонус-эфир", sortOrder: 1 },
+    ],
+  });
 
   // ── Расписание (неделя VTuber-эфиров) ──────────────────────────────────
   await db.scheduleEntry.deleteMany({});

@@ -1,0 +1,629 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→// Панель владельца: управление эфиром dypaGPT, OBS-интеграция, модерация чата.
+     4→     4→
+     5→     5→import { useCallback, useEffect, useState } from "react";
+     6→     6→import {
+     7→     7→  Ban as BanIcon,
+     8→     8→  Copy,
+     9→     9→  KeyRound,
+    10→    10→  Loader2,
+    11→    11→  MonitorPlay,
+    12→    12→  Play,
+    13→    13→  Plus,
+    14→    14→  Radio,
+    15→    15→  RefreshCcw,
+    16→    16→  Save,
+    17→    17→  Server,
+    18→    18→  Square,
+    19→    19→  Sword,
+    20→    20→} from "lucide-react";
+    21→    21→import {
+    22→    22→  Dialog,
+    23→    23→  DialogContent,
+    24→    24→  DialogDescription,
+    25→    25→  DialogHeader,
+    26→    26→  DialogTitle,
+    27→    27→} from "@/components/ui/dialog";
+    28→    28→import { Button } from "@/components/ui/button";
+    29→    29→import { Input } from "@/components/ui/input";
+    30→    30→import { Label } from "@/components/ui/label";
+    31→    31→import { Switch } from "@/components/ui/switch";
+    32→    32→import { Separator } from "@/components/ui/separator";
+    33→    33→import { useBackstageStore } from "@/components/backstage/store";
+    34→    34→import { toast } from "@/hooks/use-toast";
+    35→    35→import { cn } from "@/lib/utils";
+    36→    36→import type { PublicChannel } from "@/lib/types";
+    37→    37→
+    38→    38→type BanRow = { uid: string; name: string; reason: string; until: number };
+    39→    39→type ModRow = { uid: string; name: string };
+    40→    40→
+    41→    41→type Draft = {
+    42→    42→  name: string;
+    43→    43→  liveTitle: string;
+    44→    44→  liveCategory: string;
+    45→    45→  liveTags: string;
+    46→    46→  livePreviewUrl: string;
+    47→    47→};
+    48→    48→
+    49→    49→/** Состояние движка Owncast + демо-эфира (GET /api/admin/demo-stream) */
+    50→    50→type EngineState = {
+    51→    51→  running: boolean;
+    52→    52→  engine: { engine: "owncast"; reachable: boolean; online: boolean; version: string; baseUrl: string };
+    53→    53→  rtmp: { url: string; key: string };
+    54→    54→  hls: { url: string };
+    55→    55→};
+    56→    56→
+    57→    57→function draftOf(c: PublicChannel): Draft {
+    58→    58→  return {
+    59→    59→    name: c.name,
+    60→    60→    liveTitle: c.liveTitle ?? "",
+    61→    61→    liveCategory: c.liveCategory ?? "",
+    62→    62→    liveTags: c.liveTags.join(", "),
+    63→    63→    livePreviewUrl: c.livePreviewUrl ?? "",
+    64→    64→  };
+    65→    65→}
+    66→    66→
+    67→    67→export function AdminPanel() {
+    68→    68→  const { adminOpen, setAdminOpen, channels, setChannels, patchChannel, openChannel } = useBackstageStore();
+    69→    69→  const [selected, setSelected] = useState<string | null>(null);
+    70→    70→  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+    71→    71→  const [saving, setSaving] = useState(false);
+    72→    72→  const [newName, setNewName] = useState("");
+    73→    73→
+    74→    74→  // ── Модерация и OBS (REST чат-сервиса) ─────────────────────
+    75→    75→  const [bans, setBans] = useState<BanRow[]>([]);
+    76→    76→  const [mods, setMods] = useState<ModRow[]>([]);
+    77→    77→  const [demoChat, setDemoChat] = useState<boolean | null>(null);
+    78→    78→
+    79→    79→  const chatSend = useCallback(async (text: string) => {
+    80→    80→    try {
+    81→    81→      const tr = await fetch("/api/chat/token", { cache: "no-store" });
+    82→    82→      if (!tr.ok) throw new Error("нет токена");
+    83→    83→      const { token } = (await tr.json()) as { token: string };
+    84→    84→      const res = await fetch(`/api/send?XTransformPort=3003`, {
+    85→    85→        method: "POST",
+    86→    86→        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    87→    87→        body: JSON.stringify({ channelSlug: selected ?? "dypagpt", text }),
+    88→    88→      });
+    89→    89→      const d = (await res.json()) as { ok: boolean; error?: string; command?: boolean };
+    90→    90→      if (!res.ok || !d.ok) throw new Error(d.error ?? "ошибка");
+    91→    91→      return true;
+    92→    92→    } catch (e) {
+    93→    93→      toast({ title: "Команда не выполнена", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+    94→    94→      return false;
+    95→    95→    }
+    96→    96→  }, [selected]);
+    97→    97→
+    98→    98→  const refreshModeration = useCallback(async () => {
+    99→    99→    const slug = selected ?? "dypagpt";
+   100→   100→    try {
+   101→   101→      const [b, m, s] = await Promise.all([
+   102→   102→        fetch(`/api/bans?XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ bans?: BanRow[] }>),
+   103→   103→        fetch(`/api/mods?channel=${encodeURIComponent(slug)}&XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ mods?: ModRow[] }>),
+   104→   104→        fetch(`/api/chstate?channel=${encodeURIComponent(slug)}&XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ demo?: boolean }>),
+   105→   105→      ]);
+   106→   106→      setBans(b.bans ?? []);
+   107→   107→      setMods(m.mods ?? []);
+   108→   108→      setDemoChat(Boolean(s.demo));
+   109→   109→    } catch {
+   110→   110→      /* чат-сервис недоступен */
+   111→   111→    }
+   112→   112→  }, [selected]);
+   113→   113→
+   114→   114→  useEffect(() => {
+   115→   115→    if (adminOpen) void refreshModeration();
+   116→   116→  }, [adminOpen, refreshModeration]);
+   117→   117→
+   118→   118→  // ── Движок Owncast: статус + демо-эфир (ffmpeg → RTMP) ───────────
+   119→   119→  const [engineState, setEngineState] = useState<EngineState | null>(null);
+   120→   120→  const [demoBusy, setDemoBusy] = useState(false);
+   121→   121→
+   122→   122→  const refreshEngine = useCallback(async () => {
+   123→   123→    try {
+   124→   124→      const res = await fetch("/api/admin/demo-stream", { cache: "no-store" });
+   125→   125→      if (!res.ok) return;
+   126→   126→      setEngineState((await res.json()) as EngineState);
+   127→   127→    } catch {
+   128→   128→      /* движок не отвечает */
+   129→   129→    }
+   130→   130→  }, []);
+   131→   131→
+   132→   132→  useEffect(() => {
+   133→   133→    if (!adminOpen) return;
+   134→   134→    void refreshEngine();
+   135→   135→    const t = setInterval(() => void refreshEngine(), 10_000);
+   136→   136→    return () => clearInterval(t);
+   137→   137→  }, [adminOpen, refreshEngine]);
+   138→   138→
+   139→   139→  const toggleDemo = useCallback(
+   140→   140→    async (action: "start" | "stop") => {
+   141→   141→      setDemoBusy(true);
+   142→   142→      try {
+   143→   143→        const res = await fetch("/api/admin/demo-stream", {
+   144→   144→          method: "POST",
+   145→   145→          headers: { "content-type": "application/json" },
+   146→   146→          body: JSON.stringify({ action }),
+   147→   147→        });
+   148→   148→        const d = (await res.json()) as { ok?: boolean; message?: string };
+   149→   149→        if (!res.ok || !d.ok) throw new Error(d.message ?? "Ошибка");
+   150→   150→        toast({
+   151→   151→          title: action === "start" ? "Демо-эфир запущен" : "Демо-эфир остановлен",
+   152→   152→          description:
+   153→   153→            action === "start"
+   154→   154→              ? "ffmpeg пушит RTMP в Owncast — плеер покажет поток через несколько секунд"
+   155→   155→              : "Эфир завершён, витрина перейдёт в оффлайн",
+   156→   156→        });
+   157→   157→        await refreshEngine();
+   158→   158→        // Обновляем каналы сразу: статус эфира меняется
+   159→   159→        const ch = await fetch("/api/channels", { cache: "no-store" }).then(
+   160→   160→          (r) => r.json() as Promise<{ channels?: PublicChannel[] }>
+   161→   161→        );
+   162→   162→        if (ch.channels) setChannels(ch.channels);
+   163→   163→      } catch (e) {
+   164→   164→        toast({ title: "Ошибка демо-эфира", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+   165→   165→      } finally {
+   166→   166→        setDemoBusy(false);
+   167→   167→      }
+   168→   168→    },
+   169→   169→    [refreshEngine, setChannels]
+   170→   170→  );
+   171→   171→
+   172→   172→  const copyText = useCallback((text: string, title: string) => {
+   173→   173→    void navigator.clipboard
+   174→   174→      .writeText(text)
+   175→   175→      .then(() => toast({ title }))
+   176→   176→      .catch(() => toast({ title: "Не удалось скопировать", variant: "destructive" }));
+   177→   177→  }, []);
+   178→   178→
+   179→   179→  useEffect(() => {
+   180→   180→    if (channels.length > 0) {
+   181→   181→      setSelected((prev) => prev ?? channels[0].slug);
+   182→   182→    }
+   183→   183→  }, [channels]);
+   184→   184→
+   185→   185→  useEffect(() => {
+   186→   186→    setDrafts((prev) => {
+   187→   187→      const next = { ...prev };
+   188→   188→      for (const c of channels) {
+   189→   189→        next[c.slug] = prev[c.slug] ?? draftOf(c);
+   190→   190→      }
+   191→   191→      return next;
+   192→   192→    });
+   193→   193→  }, [channels]);
+   194→   194→
+   195→   195→  const current = channels.find((c) => c.slug === selected) ?? null;
+   196→   196→  const draft = current ? (drafts[current.slug] ?? draftOf(current)) : null;
+   197→   197→
+   198→   198→  const setDraft = useCallback((patch: Partial<Draft>) => {
+   199→   199→    if (!current) return;
+   200→   200→    setDrafts((prev) => ({ ...prev, [current.slug]: { ...prev[current.slug], ...patch } }));
+   201→   201→  }, [current]);
+   202→   202→
+   203→   203→  const save = useCallback(async () => {
+   204→   204→    if (!current || !draft) return;
+   205→   205→    setSaving(true);
+   206→   206→    try {
+   207→   207→      const res = await fetch(`/api/channels/${current.slug}`, {
+   208→   208→        method: "PATCH",
+   209→   209→        headers: { "content-type": "application/json" },
+   210→   210→        body: JSON.stringify({
+   211→   211→          name: draft.name,
+   212→   212→          liveTitle: draft.liveTitle || null,
+   213→   213→          liveCategory: draft.liveCategory || null,
+   214→   214→          liveTags: draft.liveTags.split(",").map((t) => t.trim()).filter(Boolean),
+   215→   215→          livePreviewUrl: draft.livePreviewUrl || null,
+   216→   216→        }),
+   217→   217→      });
+   218→   218→      const data = (await res.json()) as { channel?: PublicChannel; error?: string; message?: string };
+   219→   219→      if (!res.ok || !data.channel) throw new Error(data.message ?? data.error ?? "Ошибка сохранения");
+   220→   220→      patchChannel(current.slug, data.channel);
+   221→   221→      toast({
+   222→   222→        title: "Изменения сохранены",
+   223→   223→        description: `Канал ${data.channel.name} обновлён`,
+   224→   224→      });
+   225→   225→    } catch (e) {
+   226→   226→      toast({ title: "Ошибка", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+   227→   227→    } finally {
+   228→   228→      setSaving(false);
+   229→   229→    }
+   230→   230→  }, [current, draft, patchChannel]);
+   231→   231→
+   232→   232→  const createChannel = useCallback(async () => {
+   233→   233→    const name = newName.trim();
+   234→   234→    if (name.length < 2) return;
+   235→   235→    try {
+   236→   236→      const res = await fetch("/api/channels", {
+   237→   237→        method: "POST",
+   238→   238→        headers: { "content-type": "application/json" },
+   239→   239→        body: JSON.stringify({ name }),
+   240→   240→      });
+   241→   241→      const data = (await res.json()) as { channel?: PublicChannel; message?: string };
+   242→   242→      if (!res.ok || !data.channel) throw new Error(data.message ?? "Ошибка создания");
+   243→   243→      setChannels([...channels, data.channel]);
+   244→   244→      setSelected(data.channel.slug);
+   245→   245→      setNewName("");
+   246→   246→      toast({ title: "Канал создан", description: `Автор «${name}» добавлен на платформу` });
+   247→   247→    } catch (e) {
+   248→   248→      toast({ title: "Ошибка", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+   249→   249→    }
+   250→   250→  }, [newName, channels, setChannels]);
+   251→   251→
+   252→   252→  const copyKey = () => {
+   253→   253→    if (!engineState?.rtmp.key) return;
+   254→   254→    copyText(engineState.rtmp.key, "Stream key скопирован");
+   255→   255→  };
+   256→   256→
+   257→   257→  return (
+   258→   258→    <Dialog open={adminOpen} onOpenChange={setAdminOpen}>
+   259→   259→      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-border bg-card">
+   260→   260→        <DialogHeader>
+   261→   261→          <DialogTitle className="headline flex items-center gap-2 text-base">
+   262→   262→            <Radio className="size-5 text-primary" />
+   263→   263→            ПУЛЬТ ЭФИРА
+   264→   264→          </DialogTitle>
+   265→   265→          <DialogDescription>
+   266→   266→            Движок Owncast, OBS-интеграция и модерация чата канала dypaGPT.
+   267→   267→          </DialogDescription>
+   268→   268→        </DialogHeader>
+   269→   269→
+   270→   270→        {/* Выбор канала */}
+   271→   271→        <div className="flex flex-wrap gap-2">
+   272→   272→          {channels.map((c) => (
+   273→   273→            <button
+   274→   274→              key={c.slug}
+   275→   275→              onClick={() => setSelected(c.slug)}
+   276→   276→              className={cn(
+   277→   277→                "flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm transition-colors",
+   278→   278→                selected === c.slug
+   279→   279→                  ? "border-primary/60 bg-accent text-accent-foreground"
+   280→   280→                  : "border-border hover:bg-secondary"
+   281→   281→              )}
+   282→   282→            >
+   283→   283→              {c.name}
+   284→   284→              {c.isLive && <span className="size-1.5 rounded-full bg-live live-dot" aria-label="в эфире" />}
+   285→   285→            </button>
+   286→   286→          ))}
+   287→   287→        </div>
+   288→   288→
+   289→   289→        {current && draft ? (
+   290→   290→          <div className="space-y-4">
+   291→   291→            {/* Движок Owncast: реальный статус эфира + демо-эфир */}
+   292→   292→            <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+   293→   293→              <div className="flex items-center gap-2">
+   294→   294→                <Server className="size-4 text-primary" />
+   295→   295→                <span className="label-caps text-sm">СТРИМИНГ-ДВИЖОК · OWNCast</span>
+   296→   296→                {engineState && (
+   297→   297→                  <span
+   298→   298→                    className={cn(
+   299→   299→                      "label-caps ml-auto rounded-full px-2 py-px text-[10px]",
+   300→   300→                      engineState.engine.reachable
+   301→   301→                        ? "bg-[#5ad1a4]/15 text-[#5ad1a4]"
+   302→   302→                        : "bg-destructive/15 text-destructive"
+   303→   303→                    )}
+   304→   304→                  >
+   305→   305→                    {engineState.engine.reachable
+   306→   306→                      ? `ВЕРСИЯ ${engineState.engine.version || "?"}`
+   307→   307→                      : "НЕДОСТУПЕН"}
+   308→   308→                  </span>
+   309→   309→                )}
+   310→   310→              </div>
+   311→   311→
+   312→   312→              {engineState ? (
+   313→   313→                engineState.engine.reachable ? (
+   314→   314→                  <>
+   315→   315→                    <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+   316→   316→                      {engineState.engine.online ? (
+   317→   317→                        <span className="live-breathe label-caps flex items-center gap-1.5 rounded-full bg-live px-2 py-px text-[11px] text-white">
+   318→   318→                          <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
+   319→   319→                          ЭФИР ИДЁТ
+   320→   320→                        </span>
+   321→   321→                      ) : (
+   322→   322→                        <span className="label-caps rounded-full bg-secondary px-2 py-px text-[11px] text-muted-foreground">
+   323→   323→                          ОФЛАЙН
+   324→   324→                        </span>
+   325→   325→                      )}
+   326→   326→                      <span className="text-xs text-muted-foreground">
+   327→   327→                        Статус приходит из движка: эфир = RTMP-пуш из OBS
+   328→   328→                      </span>
+   329→   329→                    </div>
+   330→   330→
+   331→   331→                    {/* Демо-эфир */}
+   332→   332→                    <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+   333→   333→                      <Button
+   334→   334→                        variant={engineState.running ? "destructive" : "default"}
+   335→   335→                        size="sm"
+   336→   336→                        disabled={demoBusy}
+   337→   337→                        onClick={() => void toggleDemo(engineState.running ? "stop" : "start")}
+   338→   338→                        className="label-caps gap-2"
+   339→   339→                      >
+   340→   340→                        {demoBusy ? (
+   341→   341→                          <Loader2 className="size-4 animate-spin" />
+   342→   342→                        ) : engineState.running ? (
+   343→   343→                          <Square className="size-4" />
+   344→   344→                        ) : (
+   345→   345→                          <Play className="size-4" />
+   346→   346→                        )}
+   347→   347→                        {engineState.running ? "ОСТАНОВИТЬ ДЕМО-ЭФИР" : "ДЕМО-ЭФИР (FFMPEG)"}
+   348→   348→                      </Button>
+   349→   349→                      <p className="text-xs leading-snug text-muted-foreground">
+   350→   350→                        ffmpeg пушит тестовый поток в RTMP — проверка всего конвейера без OBS
+   351→   351→                      </p>
+   352→   352→                    </div>
+   353→   353→                  </>
+   354→   354→                ) : (
+   355→   355→                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-muted-foreground">
+   356→   356→                    Owncast не отвечает по адресу <code className="font-mono">{engineState.engine.baseUrl}</code>.
+   357→   357→                    Запустите движок: <code className="font-mono">cd mini-services/owncast && bun run dev</code>
+   358→   358→                  </p>
+   359→   359→                )
+   360→   360→              ) : (
+   361→   361→                <p className="text-xs text-muted-foreground">Проверяем движок…</p>
+   362→   362→              )}
+   363→   363→
+   364→   364→              {/* RTMP для OBS */}
+   365→   365→              <div className="space-y-1.5">
+   366→   366→                <Label className="label-caps text-[11px] text-muted-foreground">RTMP-СЕРВЕР ДЛЯ OBS</Label>
+   367→   367→                <div className="flex gap-2">
+   368→   368→                  <Input
+   369→   369→                    readOnly
+   370→   370→                    value={engineState?.rtmp.url ?? ""}
+   371→   371→                    aria-label="RTMP-сервер"
+   372→   372→                    className="bg-[#1a1a21] font-mono text-xs"
+   373→   373→                  />
+   374→   374→                  <Button
+   375→   375→                    variant="secondary"
+   376→   376→                    size="sm"
+   377→   377→                    className="shrink-0"
+   378→   378→                    onClick={() => engineState && copyText(engineState.rtmp.url, "RTMP-адрес скопирован")}
+   379→   379→                  >
+   380→   380→                    <Copy className="size-4" />
+   381→   381→                  </Button>
+   382→   382→                </div>
+   383→   383→              </div>
+   384→   384→            </div>
+   385→   385→
+   386→   386→            <div className="grid gap-4 sm:grid-cols-2">
+   387→   387→              <div className="space-y-1.5">
+   388→   388→                <Label htmlFor="a-name">Название канала</Label>
+   389→   389→                <Input id="a-name" value={draft.name} onChange={(e) => setDraft({ name: e.target.value })} className="bg-[#1a1a21]" />
+   390→   390→              </div>
+   391→   391→              <div className="space-y-1.5">
+   392→   392→                <Label htmlFor="a-title">Заголовок эфира</Label>
+   393→   393→                <Input id="a-title" value={draft.liveTitle} onChange={(e) => setDraft({ liveTitle: e.target.value })} placeholder="О чём эфир" className="bg-[#1a1a21]" />
+   394→   394→              </div>
+   395→   395→              <div className="space-y-1.5">
+   396→   396→                <Label htmlFor="a-cat">Категория</Label>
+   397→   397→                <Input id="a-cat" value={draft.liveCategory} onChange={(e) => setDraft({ liveCategory: e.target.value })} placeholder="Например: Разработка" className="bg-[#1a1a21]" />
+   398→   398→              </div>
+   399→   399→              <div className="space-y-1.5">
+   400→   400→                <Label htmlFor="a-tags">Теги (через запятую)</Label>
+   401→   401→                <Input id="a-tags" value={draft.liveTags} onChange={(e) => setDraft({ liveTags: e.target.value })} placeholder="код, музыка" className="bg-[#1a1a21]" />
+   402→   402→              </div>
+   403→   403→              <div className="space-y-1.5 sm:col-span-2">
+   404→   404→                <Label htmlFor="a-preview">Превью эфира (URL изображения)</Label>
+   405→   405→                <Input
+   406→   406→                  id="a-preview"
+   407→   407→                  value={draft.livePreviewUrl}
+   408→   408→                  onChange={(e) => setDraft({ livePreviewUrl: e.target.value })}
+   409→   409→                  placeholder="/img/previews/saiko-live.jpg"
+   410→   410→                  className="bg-[#1a1a21] font-mono text-xs"
+   411→   411→                />
+   412→   412→              </div>
+   413→   413→            </div>
+   414→   414→
+   415→   415→            {/* Стрим-ключ Owncast */}
+   416→   416→            <div className="rounded-lg border border-border bg-secondary/40 p-3">
+   417→   417→              <div className="flex items-center gap-2 text-sm font-semibold">
+   418→   418→                <KeyRound className="size-4 text-primary" />
+   419→   419→                Стрим-ключ Owncast
+   420→   420→              </div>
+   421→   421→              <p className="mt-1 text-xs text-muted-foreground">
+   422→   422→                Вставьте в OBS: Настройки → Вещание → Ключ потока · не передавайте ключ третьим лицам
+   423→   423→              </p>
+   424→   424→              <div className="mt-2 flex gap-2">
+   425→   425→                <Input
+   426→   426→                  readOnly
+   427→   427→                  value={engineState?.rtmp.key ?? "…"}
+   428→   428→                  aria-label="Stream key"
+   429→   429→                  className="bg-[#1a1a21] font-mono text-xs"
+   430→   430→                />
+   431→   431→                <Button variant="secondary" size="sm" onClick={copyKey}>
+   432→   432→                  Копировать
+   433→   433→                </Button>
+   434→   434→                <Button variant="secondary" size="sm" onClick={() => openChannel(current.slug)}>
+   435→   435→                  Открыть канал
+   436→   436→                </Button>
+   437→   437→              </div>
+   438→   438→            </div>
+   439→   439→
+   440→   440→            {/* OBS-интеграция */}
+   441→   441→            {current && (
+   442→   442→              <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+   443→   443→                <div className="label-caps flex items-center gap-2 text-sm">
+   444→   444→                  <MonitorPlay className="size-4 text-primary" />
+   445→   445→                  ИНТЕГРАЦИЯ С OBS
+   446→   446→                </div>
+   447→   447→                <div className="space-y-1.5">
+   448→   448→                  <Label className="label-caps text-[11px] text-muted-foreground">
+   449→   449→                    ЧАТ-ОВЕРЛЕЙ ДЛЯ BROWSER SOURCE
+   450→   450→                  </Label>
+   451→   451→                  <div className="flex gap-2">
+   452→   452→                    <Input
+   453→   453→                      readOnly
+   454→   454→                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/overlay?channel=${current.slug}&XTransformPort=3003`}
+   455→   455→                      aria-label="URL оверлея чата"
+   456→   456→                      className="bg-[#1a1a21] font-mono text-xs"
+   457→   457→                    />
+   458→   458→                    <Button
+   459→   459→                      variant="secondary"
+   460→   460→                      size="sm"
+   461→   461→                      className="shrink-0"
+   462→   462→                      onClick={() =>
+   463→   463→                        void navigator.clipboard
+   464→   464→                          .writeText(`${window.location.origin}/overlay?channel=${current.slug}&XTransformPort=3003`)
+   465→   465→                          .then(() => toast({ title: "URL оверлея скопирован", description: "Вставьте в OBS → Источники → Браузер" }))
+   466→   466→                          .catch(() => toast({ title: "Не удалось скопировать", variant: "destructive" }))
+   467→   467→                      }
+   468→   468→                    >
+   469→   469→                      <Copy className="size-4" />
+   470→   470→                    </Button>
+   471→   471→                  </div>
+   472→   472→                  <p className="text-xs text-muted-foreground">
+   473→   473→                    Прозрачный чат с эмодзи 7TV/BTTV/FFZ, бейджами и авто-скроллом. Параметр
+   474→   474→                    <code className="mx-1 rounded bg-black/30 px-1 font-mono text-[10px]">&scale=1.5</code>
+   475→   475→                    увеличит размер текста.
+   476→   476→                  </p>
+   477→   477→                </div>
+   478→   478→                <div className="space-y-1.5">
+   479→   479→                  <Label className="label-caps text-[11px] text-muted-foreground">HTTP API ЧАТА (ДЛЯ БОТОВ И ВИДЖЕТОВ)</Label>
+   480→   480→                  <pre className="max-h-44 overflow-auto rounded-md bg-black/40 p-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+   481→   481→{`GET  /api/messages?channel=${current.slug}&limit=50&XTransformPort=3003
+   482→   482→POST /api/send  { "channelSlug": "${current.slug}", "text": "…" }
+   483→   483→     + Authorization: Bearer <токен из /api/chat/token>
+   484→   484→GET  /api/emotes?XTransformPort=3003
+   485→   485→GET  /api/chstate?channel=${current.slug}&XTransformPort=3003`}
+   486→   486→                  </pre>
+   487→   487→                </div>
+   488→   488→              </div>
+   489→   489→            )}
+   490→   490→
+   491→   491→            {/* Модерация */}
+   492→   492→            <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+   493→   493→              <div className="flex items-center gap-2">
+   494→   494→                <Sword className="size-4 text-primary" />
+   495→   495→                <span className="label-caps text-sm">МОДЕРАЦИЯ ЧАТА</span>
+   496→   496→                <Button
+   497→   497→                  variant="ghost"
+   498→   498→                  size="sm"
+   499→   499→                  className="label-caps ml-auto h-7 gap-1 px-2 text-[10px] text-muted-foreground"
+   500→   500→                  onClick={() => void refreshModeration()}
+   501→   501→                >
+   502→   502→                  <RefreshCcw className="size-3.5" /> ОБНОВИТЬ
+   503→   503→                </Button>
+   504→   504→              </div>
+   505→   505→
+   506→   506→              {/* Демо-чат */}
+   507→   507→              {demoChat !== null && (
+   508→   508→                <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+   509→   509→                  <Switch
+   510→   510→                    id="demo-chat-toggle"
+   511→   511→                    checked={demoChat}
+   512→   512→                    onCheckedChange={(v) => {
+   513→   513→                      setDemoChat(v);
+   514→   514→                      void chatSend(`/demo ${v ? "on" : "off"}`).then((ok) => {
+   515→   515→                        if (ok) toast({ title: v ? "Демо-чат включён" : "Демо-чат выключен" });
+   516→   516→                      });
+   517→   517→                    }}
+   518→   518→                    aria-label="Демо-чат"
+   519→   519→                  />
+   520→   520→                  <Label htmlFor="demo-chat-toggle" className="cursor-pointer text-xs leading-snug">
+   521→   521→                    ДЕМО-ЧАТ <span className="font-normal text-muted-foreground">(фейковые зрители оживляют витрину)</span>
+   522→   522→                  </Label>
+   523→   523→                </div>
+   524→   524→              )}
+   525→   525→
+   526→   526→              {/* Моды */}
+   527→   527→              <div>
+   528→   528→                <p className="label-caps mb-1.5 text-[11px] text-muted-foreground">
+   529→   529→                  МОДЕРАТОРЫ ({mods.length})
+   530→   530→                </p>
+   531→   531→                <div className="max-h-28 space-y-1 overflow-y-auto">
+   532→   532→                  {mods.length === 0 && (
+   533→   533→                    <p className="text-xs text-muted-foreground/70">
+   534→   534→                      Пока никого. Назначить: <code className="rounded bg-black/30 px-1 font-mono text-[10px]">/mod имя</code> в чате
+   535→   535→                    </p>
+   536→   536→                  )}
+   537→   537→                  {mods.map((m) => (
+   538→   538→                    <div key={m.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+   539→   539→                      <Sword className="size-3.5 text-[#5ad1a4]" />
+   540→   540→                      <span className="font-semibold">{m.name}</span>
+   541→   541→                      <Button
+   542→   542→                        variant="ghost"
+   543→   543→                        size="sm"
+   544→   544→                        className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
+   545→   545→                        onClick={() => {
+   546→   546→                          void chatSend(`/unmod ${m.name}`).then((ok) => {
+   547→   547→                            if (ok) void refreshModeration();
+   548→   548→                          });
+   549→   549→                        }}
+   550→   550→                      >
+   551→   551→                        СНЯТЬ
+   552→   552→                      </Button>
+   553→   553→                    </div>
+   554→   554→                  ))}
+   555→   555→                </div>
+   556→   556→              </div>
+   557→   557→
+   558→   558→              {/* Баны */}
+   559→   559→              <div>
+   560→   560→                <p className="label-caps mb-1.5 text-[11px] text-muted-foreground">
+   561→   561→                  АКТИВНЫЕ БАНЫ ({bans.length})
+   562→   562→                </p>
+   563→   563→                <div className="max-h-28 space-y-1 overflow-y-auto">
+   564→   564→                  {bans.length === 0 && (
+   565→   565→                    <p className="text-xs text-muted-foreground/70">Банов нет — чат в мире и гармонии</p>
+   566→   566→                  )}
+   567→   567→                  {bans.map((b) => (
+   568→   568→                    <div key={b.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+   569→   569→                      <BanIcon className="size-3.5 text-destructive" />
+   570→   570→                      <span className="font-semibold">{b.name}</span>
+   571→   571→                      <span className="text-muted-foreground">
+   572→   572→                        {b.until === 0 ? "навсегда" : `до ${new Date(b.until).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
+   573→   573→                      </span>
+   574→   574→                      <Button
+   575→   575→                        variant="ghost"
+   576→   576→                        size="sm"
+   577→   577→                        className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-primary"
+   578→   578→                        onClick={() => {
+   579→   579→                          void chatSend(`/unban ${b.name}`).then((ok) => {
+   580→   580→                            if (ok) void refreshModeration();
+   581→   581→                          });
+   582→   582→                        }}
+   583→   583→                      >
+   584→   584→                        РАЗБАН
+   585→   585→                      </Button>
+   586→   586→                    </div>
+   587→   587→                  ))}
+   588→   588→                </div>
+   589→   589→              </div>
+   590→   590→            </div>
+   591→   591→
+   592→   592→            <Button onClick={() => void save()} disabled={saving} className="label-caps w-full gap-2">
+   593→   593→              <Save className="size-4" />
+   594→   594→              {saving ? "СОХРАНЯЕМ…" : "СОХРАНИТЬ КАНАЛ"}
+   595→   595→            </Button>
+   596→   596→          </div>
+   597→   597→        ) : (
+   598→   598→          <p className="py-6 text-center text-sm text-muted-foreground">Каналы не найдены</p>
+   599→   599→        )}
+   600→   600→
+   601→   601→        <Separator />
+   602→   602→
+   603→   603→        {/* Создание канала */}
+   604→   604→        <div className="space-y-2">
+   605→   605→          <Label htmlFor="new-channel" className="flex items-center gap-2 text-sm font-semibold">
+   606→   606→            <Plus className="size-4 text-primary" />
+   607→   607→            Новый автор · канал
+   608→   608→          </Label>
+   609→   609→          <div className="flex gap-2">
+   610→   610→            <Input
+   611→   611→              id="new-channel"
+   612→   612→              value={newName}
+   613→   613→              onChange={(e) => setNewName(e.target.value)}
+   614→   614→              placeholder="Имя автора / канал"
+   615→   615→              className="bg-[#1a1a21]"
+   616→   616→            />
+   617→   617→            <Button variant="secondary" onClick={() => void createChannel()} disabled={newName.trim().length < 2}>
+   618→   618→              Создать
+   619→   619→            </Button>
+   620→   620→          </div>
+   621→   621→          <p className="text-xs text-muted-foreground">
+   622→   622→            Slug и stream key генерируются автоматически
+   623→   623→          </p>
+   624→   624→        </div>
+   625→   625→      </DialogContent>
+   626→   626→    </Dialog>
+   627→   627→  );
+   628→   628→}
+   629→   629→

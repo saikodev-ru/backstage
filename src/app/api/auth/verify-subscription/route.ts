@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionUser, toPublicUser } from "@/lib/auth";
 import { checkTelegramSubscription } from "@/lib/telegram";
@@ -7,26 +7,38 @@ import { subscriptionCheckConfigured } from "@/lib/env";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/auth/verify-subscription
+ * POST /api/auth/verify-subscription { chatId?: string }
  * Ручная перепроверка «платности» подписчика через Bot API getChatMember.
+ * Можно проверить конкретный ТГК (chatId из реестра) — для private-эфиров
+ * с выбранным каналом подписки; иначе проверяется основной чат из env.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  if (!subscriptionCheckConfigured || !user.telegramId || user.telegramId.startsWith("demo:")) {
+
+  let chatId: string | undefined;
+  try {
+    const body = (await req.json()) as { chatId?: string };
+    chatId = typeof body?.chatId === "string" && body.chatId.trim() ? body.chatId.trim() : undefined;
+  } catch {
+    /* пустое тело — основной чат */
+  }
+  const configured = subscriptionCheckConfigured || Boolean(chatId);
+
+  if (!configured || !user.telegramId || user.telegramId.startsWith("demo:")) {
     return NextResponse.json(
       {
         isSubscriber: user.isSubscriber,
         checked: false,
-        message: "Проверка подписки не настроена (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID) либо это демо-аккаунт",
+        message: "Проверка подписки не настроена (TELEGRAM_BOT_TOKEN + ТГК) либо это демо-аккаунт",
       },
       { status: 200 }
     );
   }
 
-  const check = await checkTelegramSubscription(user.telegramId);
+  const check = await checkTelegramSubscription(user.telegramId, chatId);
   if (!check.ok) {
     return NextResponse.json(
       { isSubscriber: user.isSubscriber, checked: false, error: check.error, status: check.status },

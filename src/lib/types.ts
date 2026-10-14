@@ -29,6 +29,10 @@ export type PublicChannel = {
   bannerUrl: string | null;
   accentColor: string;
   telegramLink: string | null;
+  /** Доступ к эфиру: публичный или приватный (гейт по платной подписке) */
+  access: "public" | "private";
+  /** Telegram-канал, который должен быть в подписках зрителя (private-эфиры) */
+  requiredTelegramChatId?: string | null;
   isLive: boolean;
   liveTitle: string | null;
   liveCategory: string | null;
@@ -55,10 +59,21 @@ export type ChatMessageDto = {
   text: string;
   ts: number;
   system: boolean;
-  /** Бейдж отправителя (для UI) */
+  /** Бейдж отправителя (для UI, легаси) */
   role?: ChatRole;
+  /** Twitch-подобные бейджи: owner | mod | vip | sub */
+  badges?: string[];
   /** Сообщение удалено модератором */
   deleted?: boolean;
+};
+
+/** Зритель в чате (Twitch community drawer) */
+export type ChatterDto = {
+  uid: string;
+  name: string;
+  color: string;
+  avatar: string | null;
+  badges: string[];
 };
 
 export type AuthConfigDto = {
@@ -120,4 +135,13 @@ export type EmoteDto = {
   provider: "7tv" | "bttv" | "ffz";
   url: string;
   zeroUrl?: string;
+};
+
+/** Telegram-канал платных подписок (реестр для выбора в пульте) */
+export type TelegramChannelDto = {
+  id: string;
+  title: string;
+  chatId: string;
+  link: string | null;
+  note: string | null;
 };

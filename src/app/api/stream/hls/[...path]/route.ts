@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { OWNCast_BASE_URL, channelOwncastBase } from "@/lib/owncast";
+import { viewerCanWatch } from "@/lib/access";
 
 export const dynamic = "force-dynamic";
 
@@ -37,17 +38,44 @@ function validatePath(parts: string[]): string | null {
   return parts.join("/");
 }
 
-// Кэш slug → база Owncast (60с, чтобы не дёргать БД на каждый сегмент)
-const baseCache = new Map<string, { base: string; at: number }>();
+// Кэш slug → { base, access, requiredChat, at } (60с, чтобы не дёргать БД на каждый сегмент)
+const baseCache = new Map<
+  string,
+  { base: string; access: "public" | "private"; requiredTelegramChatId: string | null; at: number }
+>();
 const BASE_TTL_MS = 60_000;
 
-async function resolveBase(slug: string): Promise<string> {
+type ChannelGate = {
+  base: string;
+  access: "public" | "private";
+  requiredTelegramChatId: string | null;
+};
+
+async function resolveChannel(slug: string): Promise<ChannelGate> {
   const hit = baseCache.get(slug);
-  if (hit && Date.now() - hit.at < BASE_TTL_MS) return hit.base;
-  const channel = await db.channel.findUnique({ where: { slug }, select: { owncastBaseUrl: true } });
-  const base = channel ? channelOwncastBase(channel) : OWNCast_BASE_URL;
-  baseCache.set(slug, { base, at: Date.now() });
-  return base;
+  if (hit && Date.now() - hit.at < BASE_TTL_MS) return hit;
+  const channel = await db.channel.findUnique({
+    where: { slug },
+    select: { owncastBaseUrl: true, access: true, requiredTelegramChatId: true },
+  });
+  const resolved: ChannelGate = channel
+    ? {
+        base: channelOwncastBase(channel),
+        access: channel.access === "public" ? "public" : "private",
+        requiredTelegramChatId: channel.requiredTelegramChatId ?? null,
+      }
+    : { base: OWNCast_BASE_URL, access: "private", requiredTelegramChatId: null };
+  baseCache.set(slug, { ...resolved, at: Date.now() });
+  return resolved;
+}
+
+async function defaultChannel(): Promise<ChannelGate> {
+  const channel = await db.channel.findFirst({
+    orderBy: { sortOrder: "asc" },
+    select: { slug: true, owncastBaseUrl: true, access: true, requiredTelegramChatId: true },
+  });
+  if (!channel) return { base: OWNCast_BASE_URL, access: "private", requiredTelegramChatId: null };
+  return resolveChannel(channel.slug);
 }
 
 async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
@@ -57,17 +85,22 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
     return NextResponse.json({ error: "bad_path", message: "Недопустимый путь HLS" }, { status: 400 });
   }
 
-  // ── Гейт: поток открыт только подписчикам приватного канала и админам ──
-  const user = await getSessionUser();
-  if (!user || (!user.isSubscriber && user.role !== "ADMIN")) {
-    return NextResponse.json(
-      { error: "subscription_required", message: "Трансляция доступна платным подписчикам" },
-      { status: 403 }
-    );
+  // ── Гейт: public-эфир открыт всем; private — только платным подписчикам ──
+  const ch = req.nextUrl.searchParams.get("ch");
+  const gate = ch ? await resolveChannel(ch) : await defaultChannel();
+
+  if (gate.access === "private") {
+    const user = await getSessionUser();
+    const allowed = await viewerCanWatch(user, gate);
+    if (!user || !allowed) {
+      return NextResponse.json(
+        { error: "subscription_required", message: "Трансляция доступна платным подписчикам" },
+        { status: 403 }
+      );
+    }
   }
 
-  const ch = req.nextUrl.searchParams.get("ch");
-  const base = ch ? await resolveBase(ch) : OWNCast_BASE_URL;
+  const base = gate.base;
   const upstream = `${base}/hls/${rel}`;
 
   try {

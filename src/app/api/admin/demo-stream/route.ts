@@ -53,15 +53,16 @@ function clearPid(): void {
 function startDemo(): { ok: boolean } {
   if (demoRunning()) return { ok: true };
 
+  // 1080p60 — источник для лестницы транскодирования (1080p60/720p60/480p/360p)
   const child = spawn(
     "ffmpeg",
     [
       "-loglevel", "error",
       "-re",
-      "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30",
+      "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=60",
       "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=44100",
       "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
-      "-pix_fmt", "yuv420p", "-b:v", "1800k",
+      "-pix_fmt", "yuv420p", "-b:v", "6000k", "-maxrate", "6400k", "-bufsize", "9000k",
       "-c:a", "aac", "-b:a", "128k",
       "-f", "flv", RTMP_TARGET,
     ],

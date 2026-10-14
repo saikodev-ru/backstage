@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { mapChannel } from "@/lib/channels";
-import { announceToChat } from "@/lib/telegram";
+import { announceToChat, setChatSubsOnly } from "@/lib/telegram";
 import { channelOwncastBase, getOwncastState, mergeChannelWithOwncast } from "@/lib/owncast";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +37,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   let body: {
     isLive?: boolean;
+    access?: "public" | "private";
+    requiredTelegramChatId?: string | null;
     liveTitle?: string | null;
     liveCategory?: string | null;
     liveTags?: string[];
@@ -66,6 +68,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const engineState = await getOwncastState(channelOwncastBase(channel));
   const engineLive = engineState.reachable;
   if (typeof body.isLive === "boolean" && !engineLive) data.isLive = body.isLive;
+  // Доступ к эфиру: публичный или приватный (гейт по платной подписке)
+  let accessChanged = false;
+  if (body.access === "public" || body.access === "private") {
+    if (channel.access !== body.access) accessChanged = true;
+    data.access = body.access;
+  }
+  if (body.requiredTelegramChatId !== undefined) {
+    data.requiredTelegramChatId = body.requiredTelegramChatId?.trim() || null;
+  }
   if (body.liveTitle !== undefined) data.liveTitle = body.liveTitle?.slice(0, 140) ?? null;
   if (body.liveCategory !== undefined) data.liveCategory = body.liveCategory?.slice(0, 40) ?? null;
   if (body.liveTags !== undefined) {
@@ -105,6 +116,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   const updated = await db.channel.update({ where: { slug }, data });
+
+  // Смена режима доступа синхронизирует чат: публичный эфир → чат открыт всем
+  if (accessChanged) {
+    const isPublic = updated.access === "public";
+    await setChatSubsOnly(slug, !isPublic);
+    await announceToChat(
+      slug,
+      isPublic
+        ? "Эфир теперь публичный — чат открыт для всех зрителей"
+        : "Эфир стал приватным — чат доступен платным подписчикам"
+    );
+  }
 
   if (!engineLive) {
     if (!wasLive && willBeLive) {
