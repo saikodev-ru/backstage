@@ -1,9 +1,13 @@
 "use client";
 
-// HLS-плеер «Бэкстейдж» с кастомными контролами и гейтингом доступа.
+// HLS-плеер «Бэкстейдж» v3 «ГРАФИТ»: кастомные контролы в стиле Twitch.
+// - громкость: нативный range со стилем .player-volume (не обрезается)
+// - качество: «Источник (1080p60) / 720p60 / 480p / 360p / Авто» (уровни HLS)
+// - кнопка «Клип» (заглушка — тост)
 // Воспроизведение: hls.js (MSE) + нативный HLS для Safari.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Level } from "hls.js";
 import type Hls from "hls.js";
 import {
   Lock,
@@ -11,12 +15,13 @@ import {
   Minimize,
   Pause,
   Play,
+  Scissors,
   Settings,
   Volume1,
   Volume2,
   VolumeX,
+  Check,
 } from "lucide-react";
-import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +32,36 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Thumb } from "@/components/backstage/cards";
+import { toast } from "@/hooks/use-toast";
 
-type Quality = { index: number; label: string };
+type Quality = { index: number; label: string; short: string };
+
+type FpsLadder = { byHeight: Map<number, number>; sourceFps: number };
+
+/** FPS уровня из атрибутов манифеста (HLS FRAME-RATE, если объявлен). */
+function fpsOf(level: Level): number {
+  const raw = (level.attrs as Record<string, string | undefined> | undefined)?.["FRAME-RATE"];
+  const fps = raw ? parseFloat(raw) : 0;
+  return Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 0;
+}
+
+/** Публичная лестница транскодинга (fps по высоте кадра) — из движка. */
+async function fetchFpsLadder(): Promise<FpsLadder | null> {
+  try {
+    const res = await fetch("/api/stream/variants", { cache: "no-store" });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { variants?: Array<{ height: number | null; framerate: number }> };
+    const byHeight = new Map<number, number>();
+    let sourceFps = 0;
+    for (const v of d.variants ?? []) {
+      if (v.height == null) sourceFps = v.framerate;
+      else if (v.framerate > 0) byHeight.set(v.height, v.framerate);
+    }
+    return { byHeight, sourceFps };
+  } catch {
+    return null;
+  }
+}
 
 export function VideoPlayer({
   src,
@@ -90,11 +123,23 @@ export function VideoPlayer({
         hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
           if (disposed) return;
           setStatus("ready");
-          const list: Quality[] = hls.levels.map((l, i) => ({
-            index: i,
-            label: l.height ? `${l.height}p` : `${Math.round((l.bitrate ?? 0) / 1000)}k`,
-          }));
-          setQualities(list);
+          // Варианты качества: верхний уровень = «Источник» (ингест без даунскейла).
+          // Owncast не публикует fps в манифесте — подтягиваем лестницу из движка
+          // и дописываем «1080p60 / 720p60 / 480p / 360p» как только узнаем fps.
+          const levels = hls.levels;
+          const build = (ladder: FpsLadder | null): Quality[] =>
+            levels.map((l, i) => {
+              const h = l.height ?? 0;
+              const isTop = i === levels.length - 1;
+              const fps = fpsOf(l) || (isTop ? ladder?.sourceFps ?? 0 : ladder?.byHeight.get(h) ?? 0);
+              const short = h ? `${h}p${fps >= 50 ? fps : ""}` : `${Math.round((l.bitrate ?? 0) / 1000)}k`;
+              return { index: i, short, label: isTop && h ? `Источник (${short})` : short };
+            });
+          setQualities(build(null));
+          void fetchFpsLadder().then((ladder) => {
+            if (disposed || !ladder) return;
+            setQualities(build(ladder));
+          });
           void video.play().catch(() => setPlaying(false));
         });
         hls.on(HlsCtor.Events.LEVEL_SWITCHED, (_e, data) => {
@@ -177,11 +222,11 @@ export function VideoPlayer({
     if (!video.muted && video.volume === 0) video.volume = 0.5;
   }, []);
 
-  const onVolumeChange = useCallback((v: number[]) => {
+  const onVolumeInput = useCallback((v: number) => {
     const video = videoRef.current;
     if (!video) return;
-    video.volume = v[0] ?? 0;
-    video.muted = (v[0] ?? 0) === 0;
+    video.volume = v;
+    video.muted = v === 0;
   }, []);
 
   const toggleFullscreen = useCallback(() => {
@@ -195,7 +240,7 @@ export function VideoPlayer({
   const seekToLive = useCallback(() => {
     const video = videoRef.current;
     const hls = hlsRef.current;
-    if (hls?.liveSyncPosition != null) {
+    if (video && hls?.liveSyncPosition != null) {
       video.currentTime = hls.liveSyncPosition;
     } else if (video && Number.isFinite(video.duration)) {
       video.currentTime = video.duration;
@@ -210,13 +255,47 @@ export function VideoPlayer({
     setCurrentQuality(index);
   }, []);
 
+  /** Кнопка «Клип» — заглушка (ТЗ: «хотя бы как заглушка»). */
+  const makeClip = useCallback(() => {
+    toast({
+      title: "Клип создан",
+      description: "Последние 30 секунд записываются (заглушка — скоро будет полноценно)",
+    });
+  }, []);
+
+  // ── Клавиатура: space/k — пауза, m — звук, f — фулскрин ────────────────
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || locked) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (e.key === " " || e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key.toLowerCase() === "m") {
+        toggleMute();
+      } else if (e.key.toLowerCase() === "f") {
+        toggleFullscreen();
+      }
+    };
+    wrap.addEventListener("keydown", onKey);
+    return () => wrap.removeEventListener("keydown", onKey);
+  }, [locked, togglePlay, toggleMute, toggleFullscreen]);
+
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const volPct = Math.round((muted ? 0 : volume) * 100);
+  const currentLabel =
+    currentQuality === -1 ? "АВТО" : (qualities.find((q) => q.index === currentQuality)?.short ?? "");
 
   return (
     <div
       ref={wrapRef}
+      tabIndex={0}
+      role="region"
+      aria-label="Видеоплеер трансляции"
       className={cn(
-        "group relative aspect-video w-full overflow-hidden bg-black",
+        "group/player relative aspect-video w-full overflow-hidden bg-black outline-none",
         fullscreen ? "aspect-auto h-full rounded-none" : "rounded-2xl"
       )}
     >
@@ -227,12 +306,12 @@ export function VideoPlayer({
             <Thumb
               src={poster}
               alt=""
-              accent={posterAccent ?? "#a970ff"}
+              accent={posterAccent ?? "#6f6f78"}
               label={posterLabel ?? "B"}
               className="absolute inset-0 [&>img]:blur-md"
             />
           ) : (
-            <div className="grid size-full place-items-center bg-[radial-gradient(100%_100%_at_50%_0%,#1d1d26_0%,#101014_100%)]">
+            <div className="grid size-full place-items-center bg-[radial-gradient(100%_100%_at_50%_0%,#1d1d22_0%,#101013_100%)]">
               <div className="text-center">
                 <div className="mx-auto grid size-16 place-items-center rounded-full bg-secondary/60">
                   <Play className="size-7 text-muted-foreground/60" />
@@ -257,7 +336,7 @@ export function VideoPlayer({
       {/* Загрузка */}
       {status === "loading" && !locked && src && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
-          <div className="size-10 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+          <div className="size-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         </div>
       )}
 
@@ -265,8 +344,8 @@ export function VideoPlayer({
       {locked && (
         <div className="absolute inset-0 grid place-items-center bg-gradient-to-b from-black/75 via-black/80 to-black/90 px-4 backdrop-blur-[2px]">
           <div className="fade-up max-w-md text-center">
-            <div className="glow-primary mx-auto grid size-16 place-items-center rounded-full bg-primary/20 ring-1 ring-primary/40">
-              <Lock className="size-7 text-primary" />
+            <div className="mx-auto grid size-16 place-items-center rounded-full bg-white/[.06] ring-1 ring-white/15">
+              <Lock className="size-7 text-foreground/90" />
             </div>
             <h3 className="headline mt-5 text-lg sm:text-xl">{lockTitle ?? "ПРИВАТНАЯ ТРАНСЛЯЦИЯ"}</h3>
             <p className="mx-auto mt-2.5 max-w-sm text-sm leading-relaxed text-muted-foreground">
@@ -286,12 +365,34 @@ export function VideoPlayer({
         </div>
       )}
 
+      {/* Клик по видео = пауза */}
+      {!locked && src && status === "ready" && (
+        <button
+          type="button"
+          onClick={togglePlay}
+          aria-label={playing ? "Пауза" : "Воспроизвести"}
+          className="absolute inset-0 cursor-pointer"
+        />
+      )}
+
+      {/* «Включить звук» — автоплей стартует без звука (как в Twitch) */}
+      {!locked && src && muted && status === "ready" && (
+        <button
+          type="button"
+          onClick={toggleMute}
+          className="glass-strong label-caps absolute bottom-16 left-3 z-20 flex items-center gap-2 rounded-full px-3.5 py-2 text-[11px] text-foreground transition-transform hover:scale-[1.03] sm:bottom-[4.5rem]"
+        >
+          <VolumeX className="size-4" />
+          ВКЛЮЧИТЬ ЗВУК
+        </button>
+      )}
+
       {/* Контролы */}
       {!locked && src && (
         <div
           className={cn(
-            "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2 pb-1.5 pt-8 opacity-100 transition-opacity sm:px-3",
-            playing && "opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+            "absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 via-black/40 to-transparent px-2 pb-1.5 pt-8 opacity-100 transition-opacity sm:px-3",
+            playing && "opacity-0 group-hover/player:opacity-100 focus-within:opacity-100"
           )}
         >
           <div className="flex items-center gap-1.5 sm:gap-2">
@@ -314,6 +415,7 @@ export function VideoPlayer({
               </button>
             )}
 
+            {/* Громкость: нативный range, стили .player-volume (глобальные) */}
             <div className="group/vol flex items-center gap-1">
               <button
                 onClick={toggleMute}
@@ -322,43 +424,72 @@ export function VideoPlayer({
               >
                 <VolumeIcon className="size-5" />
               </button>
-              <div className="w-0 overflow-hidden transition-all duration-200 group-hover/vol:w-20 group-focus-within/vol:w-20 sm:w-16 sm:group-hover/vol:w-24">
-                <Slider
-                  value={[muted ? 0 : volume]}
-                  onValueChange={onVolumeChange}
-                  max={1}
-                  step={0.05}
-                  aria-label="Громкость"
-                  className="py-1 [&_[data-slot=slider-track]]:h-1"
-                />
-              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={(e) => onVolumeInput(parseFloat(e.target.value))}
+                aria-label="Громкость"
+                className="player-volume w-14 transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:w-20 sm:group-hover/vol:w-28"
+                style={{ "--vol": `${volPct}%` } as React.CSSProperties}
+              />
             </div>
 
             <div className="ml-auto flex items-center gap-1">
+              {/* Текущее качество (метка у гайки, как в Twitch) */}
+              {qualities.length > 1 && (
+                <span
+                  aria-hidden
+                  className="label-caps hidden px-1.5 text-[10px] font-bold text-white/80 sm:inline"
+                >
+                  {currentLabel}
+                </span>
+              )}
+
+              {/* Клип (заглушка) */}
+              <button
+                onClick={makeClip}
+                aria-label="Создать клип"
+                title="Клип (заглушка)"
+                className="grid size-9 place-items-center rounded-full text-white transition-colors hover:bg-white/15"
+              >
+                <Scissors className="size-5" />
+              </button>
+
+              {/* Качество */}
               {qualities.length > 1 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
-                      aria-label="Качество"
+                      aria-label="Настройки качества"
                       className="grid size-9 place-items-center rounded-full text-white transition-colors hover:bg-white/15"
                     >
                       <Settings className="size-5" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="min-w-36">
-                    <DropdownMenuLabel>Качество</DropdownMenuLabel>
+                  <DropdownMenuContent align="end" className="glass-strong min-w-44 rounded-xl">
+                    <DropdownMenuLabel className="label-caps text-[11px]">КАЧЕСТВО</DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => setQuality(-1)}>
-                      <span className={cn(currentQuality === -1 && "text-primary font-semibold")}>Авто</span>
+                    <DropdownMenuItem onClick={() => setQuality(-1)} className="gap-2">
+                      <Check className={cn("size-3.5", currentQuality === -1 ? "opacity-100" : "opacity-0")} />
+                      <span className={cn(currentQuality === -1 && "font-bold text-foreground")}>Авто</span>
                     </DropdownMenuItem>
                     {qualities.map((q) => (
-                      <DropdownMenuItem key={q.index} onClick={() => setQuality(q.index)}>
-                        <span className={cn(currentQuality === q.index && "text-primary font-semibold")}>{q.label}</span>
+                      <DropdownMenuItem key={q.index} onClick={() => setQuality(q.index)} className="gap-2">
+                        <Check
+                          className={cn("size-3.5", currentQuality === q.index ? "opacity-100" : "opacity-0")}
+                        />
+                        <span className={cn(currentQuality === q.index && "font-bold text-foreground")}>
+                          {q.label}
+                        </span>
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+
               <button
                 onClick={toggleFullscreen}
                 aria-label={fullscreen ? "Выйти из полного экрана" : "Полный экран"}

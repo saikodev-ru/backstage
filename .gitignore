@@ -69,3 +69,4 @@ server.log
 /mini-services/owncast/owncast
 /mini-services/owncast/data/
 /mini-services/owncast/owncast-run.log
+tool-results/

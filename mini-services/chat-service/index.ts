@@ -24,6 +24,13 @@
  *    /api/mods, /api/bans, /api/chstate; CORS * everywhere
  *  - GET /overlay — OBS browser-source overlay (watch-only socket, no token)
  *
+ * v2.1 additions (Twitch-подобные бейджи и список «кто в чате»):
+ *  - badges: 'owner' | 'mod' | 'vip' | 'sub' в каждом сообщении (реальном и
+ *    демо); легаси-поле role сохранено для старого OBS-оверлея
+ *  - событие chatters:update в комнату канала (community-drawer как в
+ *    Twitch) + REST GET /api/chatters?channel=<slug>
+ *  - демо-модераторы иногда пишут в чат, демо-присутствие слегка шевелится
+ *
  * Everything lives in this single file on purpose.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
@@ -38,6 +45,7 @@ import { Database } from 'bun:sqlite'
 // ---------------------------------------------------------------------------
 
 const PORT = 3003 // hardcoded: gateway forwards via XTransformPort=3003, do not change
+const SERVICE_VERSION = '2.1.2' // badges + chatters:update + /api/chatters
 const CHAT_SECRET = process.env.CHAT_SECRET || 'backstage-dev-chat-secret-2024'
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || 'backstage-internal-2024'
 const MAIN_APP_BASE = 'http://127.0.0.1:3000'
@@ -88,6 +96,8 @@ interface ChatMsg {
   system: boolean
   /** sender badge for the UI (OWNER/MOD only; VIEWER -> field omitted) */
   role?: 'OWNER' | 'MOD'
+  /** Twitch-подобные бейджи отправителя: 'owner' | 'mod' | 'vip' | 'sub' (новый UI; OBS-оверлей использует role) */
+  badges?: string[]
   /** set by /delete — deleted messages are hidden from clients */
   deleted?: true
 }
@@ -104,6 +114,15 @@ interface BanRow {
 interface ChState {
   slowSec: number
   subsonly: number // 1 -> only subs (and MOD/OWNER) may write; default 1 (v1 behaviour)
+}
+
+/** Запись списка «кто в чате» (событие chatters:update / GET /api/chatters). */
+interface Chatter {
+  uid: string
+  name: string
+  color: string
+  avatar: string | null
+  badges: string[]
 }
 
 interface EmoteRow {
@@ -198,7 +217,10 @@ function setSetting(key: string, value: string): void {
 }
 
 /** Demo chat switch: env var wins at startup, /demo persists into settings. */
-let demoEnabled = DEMO_ENV || getSetting('demo') === '1'
+// NOTE: старые записи хранили 'on'/'off' — принимаем и их (иначе после
+// перезапуска демо молча выключалось); новые пишем каноническими '1'/'0'.
+let demoEnabled =
+  DEMO_ENV || getSetting('demo') === '1' || getSetting('demo') === 'on'
 
 // ---------------------------------------------------------------------------
 // HTTP server + socket.io (path MUST stay "/" for the gateway)
@@ -297,6 +319,8 @@ function requestParams(req: IncomingMessage): URLSearchParams {
 // ---------------------------------------------------------------------------
 
 async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
+  ensureBackground() // любой REST-запрос перевооружает фоновые таймеры (bun --hot)
+
   // --- GET /health ---
   if (pathname === '/health') {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -304,13 +328,23 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
       return
     }
     const now = Date.now()
+    // диагностика: одноразовый таймер, созданный в runtime-обработчике запроса
+    setTimeout(() => {
+      healthProbeAt = Date.now()
+    }, 3000)
     sendJson(res, 200, {
       ok: true,
       service: 'backstage-chat',
+      version: SERVICE_VERSION,
       clients: io.engine.clientsCount,
       emotes: (qEmoteCount.get() ?? { c: 0 }).c,
       bans: (qBanCount.get(now) ?? { c: 0 }).c,
       demo: demoEnabled === true,
+      timers: backgroundArmed, // фоновые таймеры вооружены
+      lastTick: bgTickAt, // эпоха-мс последнего тика (0 — таймеры не тикают)
+      tickAgo: bgTickAt === 0 ? null : now - bgTickAt, // мс с последнего тика
+      timeoutProbe: bgTimeoutAt, // сработал ли одноразовый setTimeout (0 — нет)
+      probeAt: healthProbeAt, // setTimeout из этого REST-обработчика (0 — не сработал)
     })
     return
   }
@@ -343,6 +377,21 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
       return
     }
     sendJson(res, 200, { ok: true, bans: qBanAll.all(Date.now()) })
+    return
+  }
+
+  // --- GET /api/chatters?channel=slug (кто сейчас в чате; как событие chatters:update) ---
+  if (pathname === '/api/chatters') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const channel = requestParams(req).get('channel') ?? ''
+    if (channel.length === 0) {
+      sendJson(res, 400, { ok: false, error: 'bad_request', message: 'channel is required' })
+      return
+    }
+    sendJson(res, 200, { ok: true, ...buildChatters(channel) })
     return
   }
 
@@ -625,6 +674,41 @@ function effectiveRole(user: ChatUser): Role {
   if (user.role === 'MOD') return 'MOD'
   if (qModGet.get(user.uid)) return 'MOD'
   return 'VIEWER'
+}
+
+// ---------------------------------------------------------------------------
+// Twitch-подобные бейджи ('owner' | 'mod' | 'vip' | 'sub')
+// ---------------------------------------------------------------------------
+
+/** FNV-1a: детерминированный хеш имени (стабильные бейджи/присутствие демо-зрителей). */
+function hashName(name: string): number {
+  let h = 2166136261
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/** Бейджи реального пользователя: сначала бейдж роли, затем 'sub' (как в Twitch). */
+function userBadges(user: ChatUser, role: Role): string[] {
+  const badges: string[] = []
+  if (role === 'OWNER') badges.push('owner')
+  else if (role === 'MOD') badges.push('mod')
+  if (user.sub) badges.push('sub')
+  return badges
+}
+
+/** Фиксированные демо-модераторы (главный мод — сам dypaGPT, это его помощники). */
+const DEMO_MODS = new Set(['MilkTea', 'PixelWitch'])
+
+/** Детерминированные бейджи демо-зрителя: ~15% 'vip', ~50% 'sub', демо-модам — 'mod'. */
+function demoBadges(name: string): string[] {
+  if (DEMO_MODS.has(name)) return ['mod']
+  const bucket = hashName(name) % 100
+  if (bucket < 8) return ['vip']
+  if (bucket < 66) return ['sub']
+  return []
 }
 
 /** Find a chatter by display name: latest channel history first, then bans/mods tables. */
@@ -1078,9 +1162,13 @@ async function cmdDemo(ctx: CmdCtx): Promise<CmdResult | void> {
   const arg = (ctx.args[0] ?? '').toLowerCase()
   if (arg !== 'on' && arg !== 'off') return cmdError('bad_args', 'Использование: /demo on|off')
   demoEnabled = arg === 'on'
-  setSetting('demo', arg)
-  if (!demoEnabled) nextDemoAt.clear()
+  setSetting('demo', arg === 'on' ? '1' : '0')
+  if (!demoEnabled) {
+    nextDemoAt.clear()
+    demoPresence.clear() // демо-зрители исчезают из «кто в чате» сразу
+  }
   emitSystem(ctx.channel, `Демо-чат ${arg === 'on' ? 'включён' : 'выключен'}`)
+  broadcastChatters(ctx.channel) // сразу обновляем список «кто в чате»
 }
 
 const MOD_COMMANDS: Record<string, (ctx: CmdCtx) => Promise<CmdResult | void>> = {
@@ -1252,6 +1340,7 @@ async function processChatText(
     system: false,
   }
   if (role === 'OWNER' || role === 'MOD') message.role = role
+  message.badges = userBadges(user, role) // Twitch-подобные бейджи для нового UI
   lastSentAt.set(user.uid, now)
   appendHistory(channel, message)
   io.in(roomKey(channel)).emit('chat:message', { message })
@@ -1310,17 +1399,30 @@ const DEMO_TEXTS: string[] = [
   '!uptime',
 ]
 
+const DEMO_USERS_BY_NAME = new Map(DEMO_USERS.map((u) => [u.name, u] as const))
+
 const nextDemoAt = new Map<string, number>() // channelSlug -> next demo message ts
 const DEMO_MIN_GAP = 7000
 const DEMO_MAX_GAP = 14_000
+
+/** Редкие реплики демо-модераторов — их бейдж 'mod' виден в чате. */
+const DEMO_MOD_TEXTS: string[] = [
+  'чат, не спамим 🌿',
+  'культурно, пожалуйста',
+  'вопросы — в !команды, там всё есть',
+  'напоминаю: !эмоции — список смайлов',
+  'мут не выношу, но капс прикручу 😌',
+  'следим за вайбом, всем добра',
+]
 
 function pick<T>(list: T[]): T {
   return list[Math.floor(Math.random() * list.length)]
 }
 
-function emitDemoMessage(slug: string): void {
-  const u = pick(DEMO_USERS)
-  const text = pick(DEMO_TEXTS)
+/** forced = «принудительный» спикер (демо-модератор со своей репликой). */
+function emitDemoMessage(slug: string, forced?: { user: { name: string; color: string }; text: string }): void {
+  const u = forced?.user ?? pick(DEMO_USERS)
+  const text = forced?.text ?? pick(DEMO_TEXTS)
   const message: ChatMsg = {
     id: randomUUID(),
     channelSlug: slug,
@@ -1332,6 +1434,7 @@ function emitDemoMessage(slug: string): void {
     ts: Date.now(),
     system: false,
   }
+  message.badges = demoBadges(u.name)
   appendHistory(slug, message)
   io.in(roomKey(slug)).emit('chat:message', { message })
   if (text.startsWith('!')) {
@@ -1356,30 +1459,163 @@ function emitDemoMessage(slug: string): void {
   }
 }
 
-setInterval(() => {
-  if (!demoEnabled) return
-  const now = Date.now()
-  for (const [room, members] of io.sockets.adapter.rooms) {
-    const name = String(room)
-    if (!name.startsWith('ch:')) continue // skip per-socket rooms
-    if (members.size === 0) continue
-    const slug = name.slice(3)
-    const at = nextDemoAt.get(slug)
-    if (at === undefined) {
-      nextDemoAt.set(slug, now + 2000 + Math.floor(Math.random() * 5000))
-      continue
+// демо-чат: раз в 1.5с проверяем, не пора ли подсунуть сообщение
+// (таймер ставится через startDemoTimer — см. ensureBackground ниже)
+function startDemoTimer(): void {
+  setInterval(() => {
+    if (!demoEnabled) return
+    const now = Date.now()
+    for (const [room, members] of io.sockets.adapter.rooms) {
+      const name = String(room)
+      if (!name.startsWith('ch:')) continue // skip per-socket rooms
+      if (members.size === 0) continue
+      const slug = name.slice(3)
+      const at = nextDemoAt.get(slug)
+      if (at === undefined) {
+        nextDemoAt.set(slug, now + 2000 + Math.floor(Math.random() * 5000))
+        continue
+      }
+      if (now < at) continue
+      nextDemoAt.set(slug, now + DEMO_MIN_GAP + Math.floor(Math.random() * (DEMO_MAX_GAP - DEMO_MIN_GAP)))
+      emitDemoMessage(slug, maybeModMessage(slug))
     }
-    if (now < at) continue
-    nextDemoAt.set(slug, now + DEMO_MIN_GAP + Math.floor(Math.random() * (DEMO_MAX_GAP - DEMO_MIN_GAP)))
-    emitDemoMessage(slug)
+  }, 1500)
+}
+
+/** ~15% демо-сообщений пишет модератор из присутствующих в комнате. */
+function maybeModMessage(slug: string): { user: { name: string; color: string }; text: string } | undefined {
+  if (Math.random() >= 0.15) return undefined
+  const mods = [...getDemoPresence(slug)].filter((n) => DEMO_MODS.has(n))
+  if (mods.length === 0) return undefined
+  const u = DEMO_USERS_BY_NAME.get(pick(mods))
+  if (!u) return undefined
+  return { user: u, text: pick(DEMO_MOD_TEXTS) }
+}
+
+// ---------------------------------------------------------------------------
+// Chatters list («кто в чате», community-drawer как в Twitch)
+// ---------------------------------------------------------------------------
+
+const CHATTERS_INTERVAL_MS = 15_000
+const DEMO_PRESENCE_MIN = 6 // нижняя граница при «уходах»
+const DEMO_PRESENCE_MAX = 12 // верхняя граница набора демо-зрителей
+const DEMO_PRESENCE_BASE = 8 // стартовый размер набора (8..12 по хешу slug)
+
+const demoPresence = new Map<string, Set<string>>() // channelSlug -> имена присутствующих демо-зрителей
+
+let bgTickAt = 0 // диагностика /health: последний тик 15с-таймера (0 = ещё не тикал)
+let bgTimeoutAt = 0 // диагностика /health: сработал ли отложенный setTimeout (из ensureBackground)
+let healthProbeAt = 0 // диагностика /health: setTimeout, созданный прямо в обработчике запроса
+
+const BADGE_RANK: Record<string, number> = { owner: 0, mod: 1, vip: 2, sub: 3 }
+
+/** Приоритет бейджа в списке: owner -> mod -> vip -> sub -> обычный зритель. */
+function chatterRank(badges: string[]): number {
+  let rank = 9
+  for (const b of badges) rank = Math.min(rank, BADGE_RANK[b] ?? 9)
+  return rank
+}
+
+/** Стабильный стартовый набор демо-зрителей канала (8–12, детерминированно по slug). */
+function initDemoPresence(slug: string): Set<string> {
+  const sorted = [...DEMO_USERS].sort((a, b) => hashName(slug + '|' + a.name) - hashName(slug + '|' + b.name))
+  const count = DEMO_PRESENCE_BASE + (hashName(slug) % (DEMO_PRESENCE_MAX - DEMO_PRESENCE_BASE + 1))
+  const presence = new Set(sorted.slice(0, count).map((u) => u.name))
+  if (![...presence].some((n) => DEMO_MODS.has(n))) {
+    presence.add('MilkTea') // хотя бы один демо-мод всегда в списке
+    if (presence.size > DEMO_PRESENCE_MAX) {
+      const plain = [...presence].find((n) => !DEMO_MODS.has(n))
+      if (plain) presence.delete(plain)
+    }
   }
-}, 1500)
+  return presence
+}
+
+/** Присутствие демо-зрителей канала (ленивая инициализация). */
+function getDemoPresence(slug: string): Set<string> {
+  let presence = demoPresence.get(slug)
+  if (!presence) {
+    presence = initDemoPresence(slug)
+    demoPresence.set(slug, presence)
+  }
+  return presence
+}
+
+/** Лёгкое шевеление демо-присутствия: редкий приход/уход зрителя. */
+function churnDemoPresence(slug: string): void {
+  const presence = getDemoPresence(slug)
+  const absent = DEMO_USERS.filter((u) => !presence.has(u.name))
+  if (presence.size < DEMO_PRESENCE_MAX && absent.length > 0 && Math.random() < 0.3) {
+    presence.add(pick(absent).name)
+    return
+  }
+  if (presence.size > DEMO_PRESENCE_MIN && Math.random() < 0.2) {
+    // модераторов стараемся не трогать — пусть стабильно висят в списке
+    const plain = [...presence].filter((n) => !DEMO_MODS.has(n))
+    if (plain.length > 0) presence.delete(pick(plain))
+  }
+}
+
+/** Список «кто в чате»: реальные подключённые пользователи + демо-зрители. */
+function buildChatters(slug: string): { channelSlug: string; chatters: Chatter[]; count: number } {
+  const byUid = new Map<string, Chatter>()
+  const room = io.sockets.adapter.rooms.get(roomKey(slug))
+  if (room) {
+    for (const sid of room) {
+      const s = io.sockets.sockets.get(sid)
+      const user = (s?.data?.user ?? null) as ChatUser | null
+      if (!user) continue // анонимные watch-сокеты (оверлей) в список не входят
+      if (byUid.has(user.uid)) continue // один юзер в нескольких вкладках
+      byUid.set(user.uid, {
+        uid: user.uid,
+        name: user.name,
+        color: user.color,
+        avatar: user.avatar,
+        badges: userBadges(user, effectiveRole(user)),
+      })
+    }
+  }
+  if (demoEnabled) {
+    for (const name of getDemoPresence(slug)) {
+      const u = DEMO_USERS_BY_NAME.get(name)
+      if (!u) continue
+      const uid = `demo:${name}`
+      byUid.set(uid, { uid, name, color: u.color, avatar: null, badges: demoBadges(name) })
+    }
+  }
+  const chatters = [...byUid.values()].sort(
+    (a, b) => chatterRank(a.badges) - chatterRank(b.badges) || a.name.localeCompare(b.name, 'ru'),
+  )
+  return { channelSlug: slug, chatters, count: chatters.length }
+}
+
+/** Рассылка «кто в чате» в комнату канала. */
+function broadcastChatters(slug: string): void {
+  io.in(roomKey(slug)).emit('chatters:update', buildChatters(slug))
+}
+
+/** Периодический апдейт списка + шевеление демо-присутствия (~15с). */
+function startChattersTimer(): void {
+  setInterval(() => {
+    bgTickAt = Date.now()
+    for (const [room, members] of io.sockets.adapter.rooms) {
+      const name = String(room)
+      if (!name.startsWith('ch:')) continue // skip per-socket rooms
+      if (members.size === 0) continue
+      const slug = name.slice(3)
+      if (demoEnabled) churnDemoPresence(slug)
+      broadcastChatters(slug)
+    }
+  }, CHATTERS_INTERVAL_MS)
+}
 
 // ---------------------------------------------------------------------------
 // Socket.io connection handling
 // ---------------------------------------------------------------------------
 
 io.on('connection', (socket) => {
+  ensureBackground() // любое подключение перевооружает фоновые таймеры (bun --hot)
+
   // Invalid / expired token -> proceed as anonymous (user = null).
   socket.data.user = verifyToken((socket.handshake.auth as { token?: unknown } | undefined)?.token)
   socket.data.channel = null
@@ -1402,11 +1638,13 @@ io.on('connection', (socket) => {
       socket.leave(roomKey(previous))
       socket.data.channel = null
       io.in(roomKey(previous)).emit('presence:update', { channelSlug: previous, count: roomCount(previous) })
+      broadcastChatters(previous) // обновляем «кто в чате» для покинутой комнаты
     }
     socket.join(roomKey(channelSlug))
     socket.data.channel = channelSlug
     socket.emit('chat:history', { channelSlug, messages: visibleHistory(channelSlug) })
     io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
+    broadcastChatters(channelSlug) // сразу присылаем «кто в чате» вошедшему
   })
 
   socket.on('channel:leave', (raw: unknown) => {
@@ -1415,6 +1653,7 @@ io.on('connection', (socket) => {
     if (socket.data.channel === channelSlug) socket.data.channel = null
     socket.leave(roomKey(channelSlug))
     io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
+    broadcastChatters(channelSlug)
   })
 
   socket.on('chat:send', (raw: unknown) => {
@@ -1455,6 +1694,7 @@ io.on('connection', (socket) => {
       let count = room ? room.size : 0
       if (room && room.has(socket.id)) count = Math.max(0, count - 1)
       io.in(roomKey(channel)).emit('presence:update', { channelSlug: channel, count })
+      broadcastChatters(channel) // список «кто в чате» без отключившегося
     }
   })
 })
@@ -1463,41 +1703,71 @@ io.on('connection', (socket) => {
 // Viewer counts reporting (every 10s, fire-and-forget)
 // ---------------------------------------------------------------------------
 
-setInterval(() => {
-  const counts: Record<string, number> = {}
-  for (const [room, members] of io.sockets.adapter.rooms) {
-    const name = String(room)
-    if (!name.startsWith('ch:')) continue // skip per-socket rooms
-    counts[name.slice(3)] = members.size
-  }
-  // include 0 for previously-known slugs so the main app can reset them
-  for (const slug of lastReportedViewers.keys()) {
-    if (!(slug in counts)) counts[slug] = 0
-  }
-  const anyPositive = Object.values(counts).some((n) => n > 0)
-  const needsReset = [...lastReportedViewers.entries()].some(
-    ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0,
-  )
-  if (!anyPositive && !needsReset) return
-  for (const [slug, n] of Object.entries(counts)) lastReportedViewers.set(slug, n)
-  postJson(`${MAIN_APP_BASE}/api/internal/viewers`, { counts }, 'viewers')
-}, VIEWERS_INTERVAL_MS)
+function startViewersTimer(): void {
+  setInterval(() => {
+    const counts: Record<string, number> = {}
+    for (const [room, members] of io.sockets.adapter.rooms) {
+      const name = String(room)
+      if (!name.startsWith('ch:')) continue // skip per-socket rooms
+      counts[name.slice(3)] = members.size
+    }
+    // include 0 for previously-known slugs so the main app can reset them
+    for (const slug of lastReportedViewers.keys()) {
+      if (!(slug in counts)) counts[slug] = 0
+    }
+    const anyPositive = Object.values(counts).some((n) => n > 0)
+    const needsReset = [...lastReportedViewers.entries()].some(
+      ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0,
+    )
+    if (!anyPositive && !needsReset) return
+    for (const [slug, n] of Object.entries(counts)) lastReportedViewers.set(slug, n)
+    postJson(`${MAIN_APP_BASE}/api/internal/viewers`, { counts }, 'viewers')
+  }, VIEWERS_INTERVAL_MS)
+}
 
 // ---------------------------------------------------------------------------
 // Background jobs: emotes refresh (6h), expired bans cleanup (60s)
+//
+// ВАЖНО: bun --hot не сохраняет таймеры, созданные при пере-исполнении модуля
+// (после хот-релоада они молча умирают). Поэтому все фоновые интервалы ставятся
+// идемпотентно через ensureBackground(): при оценке модуля, при первом
+// подключении сокета и на REST-запросах. После следующего релоада флаг
+// обнулится и таймеры перевооружатся заново от первого же клиента.
 // ---------------------------------------------------------------------------
 
-refreshEmotes()
-setInterval(refreshEmotes, EMOTES_REFRESH_MS)
+refreshEmotes() // разовый рефреш при загрузке модуля — не таймер, --hot не мешает
 
-setInterval(() => {
-  try {
-    qBanCleanup.run(Date.now())
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.log(`[bans] cleanup failed: ${msg}`)
-  }
-}, BANS_CLEANUP_MS)
+function startMaintenanceTimers(): void {
+  setInterval(refreshEmotes, EMOTES_REFRESH_MS)
+  setInterval(() => {
+    try {
+      qBanCleanup.run(Date.now())
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.log(`[bans] cleanup failed: ${msg}`)
+    }
+  }, BANS_CLEANUP_MS)
+}
+
+let backgroundArmed = false
+
+/** Идемпотентное (пере)вооружение всех фоновых таймеров сервиса. */
+function ensureBackground(): void {
+  if (backgroundArmed) return
+  backgroundArmed = true
+  setTimeout(() => {
+    bgTimeoutAt = Date.now()
+  }, 5000)
+  startDemoTimer()
+  startChattersTimer()
+  startViewersTimer()
+  startMaintenanceTimers()
+}
+
+// ВАЖНО: вызов ensureBackground() при оценке модуля убран сознательно —
+// bun --hot убивает таймеры, созданные при пере-исполнении модуля; единственный
+// надёжный способ вооружить таймеры — создать их из runtime-события
+// (REST-запрос или подключение сокета), что и делают вызовы выше.
 
 // ---------------------------------------------------------------------------
 // OBS overlay page (browser source; transparent background, watch-only)
@@ -1669,3 +1939,7 @@ httpServer.listen(PORT, () => {
   console.log('backstage-chat v2 listening on :3003')
   console.log(`demo chat: ${demoEnabled ? 'on' : 'off'} (DEMO_CHAT=${DEMO_ENV ? '1' : '0'})`)
 })
+
+// hot-reload probe 1
+
+// reload trigger via in-place modify

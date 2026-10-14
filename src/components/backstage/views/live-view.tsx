@@ -1,21 +1,43 @@
 "use client";
 
-// Экран эфира «GLASS ARENA»: трансляция — главный герой экрана.
-// Плеер + чат (десктоп: колонки, мобайл: сворачиваемый чат). Лишнее убрано.
+// Экран эфира v3 «ГРАФИТ»: трансляция — главный герой экрана.
+// Плеер + чат (десктоп: колонки, мобайл: сворачиваемый чат).
+// Доступ: public → всем; private → платная подписка (гейт + кнопки
+// «Подписаться» платная / «Отслеживать» бесплатная).
 
 import { useEffect, useMemo, useState } from "react";
-import { Bell, Check, Crown, Eye, Heart, Share2, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Bell,
+  Check,
+  Eye,
+  Heart,
+  Lock,
+  Share2,
+  Star,
+  ChevronDown,
+  ChevronUp,
+  Crown,
+  MessageSquare,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useAuthActions, useContent, formatCount, formatUptime } from "@/components/backstage/hooks";
 import { VideoPlayer } from "@/components/backstage/video-player";
 import { ChatPanel } from "@/components/backstage/chat-panel";
 import { toast } from "@/hooks/use-toast";
-import type { ScheduleDto } from "@/lib/types";
+import type { PublicChannel, ScheduleDto } from "@/lib/types";
 
+/** Бесплатная подписка («Отслеживать») — локальный флаг. */
 function useFollow(slug: string) {
   const [followed, setFollowed] = useState(false);
 
@@ -45,8 +67,8 @@ function useFollow(slug: string) {
         /* noop */
       }
       toast({
-        title: next ? "Вы подписались на канал" : "Подписка отменена",
-        description: next ? "Уведомим о старте эфира" : undefined,
+        title: next ? "Вы отслеживаете канал" : "Отслеживание отключено",
+        description: next ? "Уведомим о старте следующего эфира" : undefined,
       });
       return next;
     });
@@ -55,12 +77,86 @@ function useFollow(slug: string) {
   return { followed, toggle };
 }
 
+/** Диалог платной подписки: доступ к приватным эфирам через Telegram. */
+function SubscribeDialog({
+  channel,
+  open,
+  onOpenChange,
+}: {
+  channel: PublicChannel;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { verifySubscription } = useAuthActions();
+  const [checking, setChecking] = useState(false);
+  const subLink = channel.telegramLink ?? "https://t.me";
+
+  const benefits = [
+    { icon: Lock, text: "Доступ к приватным эфирам и записям" },
+    { icon: MessageSquare, text: "Эксклюзивный чат подписчиков" },
+    { icon: Star, text: "Бейдж платного подписчика в чате" },
+    { icon: Crown, text: "Поддержка канала напрямую" },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="glass-strong max-w-md rounded-2xl border-white/[.06]">
+        <DialogHeader>
+          <DialogTitle className="headline flex items-center gap-2 text-base">
+            <Star className="size-5 text-foreground" />
+            ПОДПИСКА · {channel.name}
+          </DialogTitle>
+          <DialogDescription>
+            Подписка оформляется в приватном Telegram-канале и открывает доступ ко всем приватным эфирам.
+          </DialogDescription>
+        </DialogHeader>
+
+        <ul className="space-y-2.5">
+          {benefits.map((b) => (
+            <li key={b.text} className="flex items-center gap-3 rounded-xl bg-white/[.03] px-3.5 py-2.5 text-sm">
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/[.05]">
+                <b.icon className="size-4 text-foreground/80" />
+              </span>
+              {b.text}
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-1 flex flex-col gap-2">
+          <Button asChild className="btn-gradient glow-primary label-caps gap-2 rounded-full">
+            <a href={subLink} target="_blank" rel="noreferrer noopener">
+              <Crown className="size-4" />
+              ОФОРМИТЬ В TELEGRAM
+            </a>
+          </Button>
+          <Button
+            variant="secondary"
+            className="glass label-caps gap-2 rounded-full"
+            disabled={checking}
+            onClick={() => {
+              setChecking(true);
+              void verifySubscription().finally(() => {
+                setChecking(false);
+                onOpenChange(false);
+              });
+            }}
+          >
+            <Check className="size-4" />
+            {checking ? "ПРОВЕРЯЕМ…" : "Я УЖЕ ПОДПИСАН — ПРОВЕРИТЬ"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function LiveView() {
   const { user, channels, activeChannel, setAuthOpen, setView } = useBackstageStore();
   const { verifySubscription } = useAuthActions();
   const channel = channels.find((c) => c.slug === activeChannel) ?? channels[0];
   const schedule = useContent<ScheduleDto>("schedule");
   const [chatOpen, setChatOpen] = useState(true);
+  const [subOpen, setSubOpen] = useState(false);
   const { followed, toggle } = useFollow(channel?.slug ?? "");
 
   const nextStream = useMemo(
@@ -80,9 +176,12 @@ export function LiveView() {
     );
   }
 
-  const canWatch = channel.isLive && (user?.isSubscriber || user?.role === "ADMIN");
-  const needsLogin = channel.isLive && !user;
-  const needsSub = channel.isLive && user && !user.isSubscriber && user.role !== "ADMIN";
+  // Публичный эфир — открыт всем; приватный — только подписчикам и админу
+  const isPrivateLive = channel.isLive && channel.access === "private";
+  const canWatch =
+    channel.isLive && (channel.access === "public" || user?.isSubscriber || user?.role === "ADMIN");
+  const needsLogin = isPrivateLive && !user;
+  const needsSub = isPrivateLive && user && !user.isSubscriber && user.role !== "ADMIN";
   const uptime = formatUptime(channel.liveStartedAt);
   const subLink = channel.telegramLink ?? "https://t.me";
 
@@ -102,36 +201,42 @@ export function LiveView() {
       <div className="min-w-0 flex-1">
         <div className="p-2 sm:p-3 xl:p-4">
           {channel.isLive ? (
-            <div className="overflow-hidden rounded-2xl ring-1 ring-white/10 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.9)]">
+            <div className="overflow-hidden rounded-2xl shadow-[0_24px_80px_-32px_rgba(0,0,0,0.9)]">
               <VideoPlayer
                 src={canWatch ? (channel.hlsUrl ?? null) : "locked-placeholder"}
                 locked={!canWatch}
                 poster={channel.livePreviewUrl ?? channel.bannerUrl}
-                posterAccent={channel.accentColor}
+                posterAccent="#6f6f78"
                 posterLabel={channel.name}
-                lockTitle={needsLogin ? "ПРИВАТНАЯ ТРАНСЛЯЦИЯ" : "ТОЛЬКО ДЛЯ ПОДПИСЧИКОВ"}
+                lockTitle={needsLogin ? "ПРИВАТНЫЙ ЭФИР" : "ТОЛЬКО ДЛЯ ПОДПИСЧИКОВ"}
                 lockDescription={
                   needsLogin
                     ? "Войдите через Telegram — платформа проверит вашу подписку на приватный канал и откроет эфир."
-                    : "Эфир доступен подписчикам приватного Telegram-канала. Оформите подписку и возвращайтесь."
+                    : "Эфир доступен платным подписчикам приватного Telegram-канала. Оформите подписку и возвращайтесь."
                 }
                 lockChildren={
                   needsLogin ? (
                     <div className="fade-up flex flex-col items-center gap-3">
-                      <Button size="lg" className="btn-gradient glow-primary label-caps gap-2 rounded-full px-6" onClick={() => setAuthOpen(true)}>
+                      <Button
+                        size="lg"
+                        className="btn-gradient glow-primary label-caps gap-2 rounded-full px-6"
+                        onClick={() => setAuthOpen(true)}
+                      >
                         <Crown className="size-4" />
                         Войти через Telegram
                       </Button>
-                      <span className="text-xs text-white/60">
-                        Уже подписаны? Вход проверит статус автоматически
-                      </span>
+                      <span className="text-xs text-white/60">Уже подписаны? Вход проверит статус автоматически</span>
                     </div>
                   ) : needsSub ? (
                     <div className="fade-up flex flex-col items-center gap-3">
-                      <Button size="lg" asChild className="btn-gradient glow-primary label-caps gap-2 rounded-full px-6">
+                      <Button
+                        size="lg"
+                        asChild
+                        className="btn-gradient glow-primary label-caps gap-2 rounded-full px-6"
+                      >
                         <a href={subLink} target="_blank" rel="noreferrer noopener">
                           <Crown className="size-4" />
-                          Оформить подписку
+                          Подписаться
                         </a>
                       </Button>
                       <Button
@@ -148,22 +253,14 @@ export function LiveView() {
               />
             </div>
           ) : (
-            /* Оффлайн-экран: кино-заглушка */
-            <div className="relative aspect-video w-full overflow-hidden rounded-2xl ring-1 ring-white/10">
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: `radial-gradient(120% 130% at 30% 10%, ${channel.accentColor}2e 0%, #121218 60%), linear-gradient(160deg, #17171f 0%, #0a0a0e 100%)`,
-                }}
-              />
+            /* Оффлайн-экран: кино-заглушка (чистый графит) */
+            <div className="relative aspect-video w-full overflow-hidden rounded-2xl">
+              <div className="absolute inset-0 bg-[radial-gradient(120%_130%_at_30%_10%,#232329_0%,#121215_60%),linear-gradient(160deg,#17171b_0%,#0c0c0f_100%)]" />
               <div className="absolute inset-0 grid place-items-center px-4">
                 <div className="text-center">
                   <Avatar className="mx-auto size-20 rounded-3xl ring-2 ring-white/15">
                     <AvatarImage src={channel.avatarUrl ?? undefined} alt={channel.name} />
-                    <AvatarFallback
-                      style={{ backgroundColor: `${channel.accentColor}33`, color: channel.accentColor }}
-                      className="rounded-3xl text-3xl font-black"
-                    >
+                    <AvatarFallback className="rounded-3xl bg-[#1c1c21] text-3xl font-black text-[#d6d6de]">
                       {channel.name.slice(0, 1).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -183,11 +280,19 @@ export function LiveView() {
                     <p className="mt-2 text-sm text-muted-foreground">Расписание уточняется</p>
                   )}
                   <div className="mt-5 flex flex-wrap justify-center gap-2.5">
-                    <Button variant="secondary" className="glass label-caps gap-2 rounded-full text-[12px]" onClick={() => setView("schedule")}>
+                    <Button
+                      variant="secondary"
+                      className="glass label-caps gap-2 rounded-full text-[12px]"
+                      onClick={() => setView("schedule")}
+                    >
                       <Bell className="size-4" />
                       НАПОМНИТЬ ОБ ЭФИРЕ
                     </Button>
-                    <Button variant="ghost" className="label-caps rounded-full text-[12px] text-muted-foreground" onClick={() => setView("recordings")}>
+                    <Button
+                      variant="ghost"
+                      className="label-caps rounded-full text-[12px] text-muted-foreground"
+                      onClick={() => setView("recordings")}
+                    >
                       ЗАПИСИ ЭФИРОВ
                     </Button>
                   </div>
@@ -197,15 +302,12 @@ export function LiveView() {
           )}
         </div>
 
-        {/* Инфо-бар: стеклянная панель, только суть */}
+        {/* Инфо-бар: кнопки подписки */}
         <div className="px-2 pb-4 sm:px-3 xl:px-4">
-          <div className="fade-up flex flex-wrap items-center gap-3.5 rounded-2xl border border-white/5 bg-white/[.03] p-3.5 backdrop-blur-md sm:p-4">
-            <Avatar className="size-12 rounded-2xl ring-2 ring-primary/40 sm:size-14">
+          <div className="fade-up flex flex-wrap items-center gap-3.5 rounded-2xl bg-white/[.03] p-3.5 sm:p-4">
+            <Avatar className="size-12 rounded-2xl ring-2 ring-white/15 sm:size-14">
               <AvatarImage src={channel.avatarUrl ?? undefined} alt={channel.name} />
-              <AvatarFallback
-                style={{ backgroundColor: `${channel.accentColor}33`, color: channel.accentColor }}
-                className="rounded-2xl text-xl font-black"
-              >
+              <AvatarFallback className="rounded-2xl bg-[#1c1c21] text-xl font-black text-[#d6d6de]">
                 {channel.name.slice(0, 1).toUpperCase()}
               </AvatarFallback>
             </Avatar>
@@ -219,16 +321,23 @@ export function LiveView() {
                     LIVE
                   </span>
                 )}
-                {uptime && (
-                  <span className="label-caps text-[11px] text-muted-foreground">{uptime} В ЭФИРЕ</span>
+                {channel.isLive && channel.access === "private" && (
+                  <span
+                    className="label-caps flex items-center gap-1 rounded-full bg-white/[.06] px-2.5 py-0.5 text-[11px] text-muted-foreground"
+                    title="Эфир видят только платные подписчики"
+                  >
+                    <Lock className="size-3" aria-hidden />
+                    ПРИВАТНЫЙ
+                  </span>
                 )}
+                {uptime && <span className="label-caps text-[11px] text-muted-foreground">{uptime} В ЭФИРЕ</span>}
               </div>
               {channel.isLive ? (
                 <>
                   <p className="card-title mt-1 text-sm sm:text-base">{channel.liveTitle}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {channel.liveCategory && (
-                      <span className="rounded-full bg-primary/15 px-2.5 py-px font-semibold text-primary">
+                      <span className="rounded-full bg-white/[.07] px-2.5 py-px font-semibold text-foreground/80">
                         {channel.liveCategory}
                       </span>
                     )}
@@ -244,29 +353,50 @@ export function LiveView() {
                   </div>
                 </>
               ) : (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {channel.tagline ?? `@${channel.handle}`}
-                </p>
+                <p className="mt-1 text-sm text-muted-foreground">{channel.tagline ?? `@${channel.handle}`}</p>
               )}
             </div>
 
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              {/* Платная подписка: «Подписаться» (для тех, у кого её нет) */}
+              {!user?.isSubscriber && user?.role !== "ADMIN" && (
+                <Button
+                  onClick={() => setSubOpen(true)}
+                  className="btn-gradient glow-primary label-caps gap-2 rounded-full px-5 text-[12px]"
+                >
+                  <Star className="size-4" />
+                  ПОДПИСАТЬСЯ
+                </Button>
+              )}
+              {user?.isSubscriber && (
+                <span
+                  className="label-caps flex items-center gap-1.5 rounded-full bg-[#a970ff]/15 px-3.5 py-2 text-[11px] text-[#c9a7ff]"
+                  title="Платная подписка активна"
+                >
+                  <Star className="size-3.5 fill-current" aria-hidden />
+                  ПОДПИСКА АКТИВНА
+                </span>
+              )}
+
+              {/* Бесплатная подписка: «Отслеживать» */}
               <Button
                 onClick={toggle}
+                variant="secondary"
                 className={cn(
-                  "label-caps gap-2 rounded-full px-4 text-[12px]",
-                  followed ? "glass text-primary hover:text-primary" : "btn-gradient glow-primary text-white"
+                  "label-caps gap-2 rounded-full px-5 text-[12px]",
+                  followed ? "glass text-foreground" : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 )}
                 aria-pressed={followed}
               >
-                <Heart className={cn("size-4", followed && "fill-primary")} />
-                {followed ? "ВЫ С НАМИ" : formatCount(channel.followers)}
+                <Heart className={cn("size-4", followed && "fill-foreground text-foreground")} />
+                {followed ? "ОТСЛЕЖИВАЕТЕ" : "ОТСЛЕЖИВАТЬ"}
               </Button>
+
               <Button
                 variant="ghost"
                 size="icon"
                 aria-label="Поделиться"
-                className="glass rounded-full text-muted-foreground hover:text-foreground"
+                className="rounded-full text-muted-foreground hover:text-foreground"
                 onClick={() => void share()}
               >
                 <Share2 className="size-4" />
@@ -282,18 +412,18 @@ export function LiveView() {
       </aside>
 
       {/* Чат: сворачиваемый на мобиле/планшете */}
-      <div className="border-t border-white/5 px-2 pt-2 xl:hidden sm:px-3">
+      <div className="border-t border-white/5 px-2 pt-2 sm:px-3 xl:hidden">
         <button
           onClick={() => setChatOpen((v) => !v)}
           aria-expanded={chatOpen}
           className="glass label-caps flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-[12px]"
         >
-          <span className="flex items-center gap-1.5 text-primary">
+          <span className="flex items-center gap-1.5 text-foreground">
             <Eye className="size-4" aria-hidden />
             ЧАТ
           </span>
           {channel.isLive && (
-            <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-[#ff8080]">
+            <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-live">
               {formatCount(Math.max(channel.viewers, 1))}
             </span>
           )}
@@ -304,6 +434,9 @@ export function LiveView() {
         </button>
         {chatOpen && <ChatPanel channelSlug={channel.slug} className="mt-2 h-[62vh] min-h-80 rounded-2xl" />}
       </div>
+
+      {/* Диалог платной подписки */}
+      <SubscribeDialog channel={channel} open={subOpen} onOpenChange={setSubOpen} />
     </div>
   );
 }

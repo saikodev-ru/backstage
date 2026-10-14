@@ -62,6 +62,7 @@ export function AuthDialog() {
   useEffect(() => {
     if (!authOpen || !cfg?.botConfigured || !cfg.botUsername || widgetMounted.current) return;
     let cancelled = false;
+    const botUsername = cfg.botUsername;
     // Портал Radix монтируется асинхронно — ждём кадр, чтобы контейнер точно существовал
     const raf = requestAnimationFrame(() => {
       if (cancelled) return;
@@ -73,7 +74,7 @@ export function AuthDialog() {
       const script = document.createElement("script");
       script.src = "https://telegram.org/js/telegram-widget.js?22";
       script.async = true;
-      script.setAttribute("data-telegram-login", cfg.botUsername);
+      script.setAttribute("data-telegram-login", botUsername);
       script.setAttribute("data-size", "large");
       script.setAttribute("data-radius", "8");
       script.setAttribute("data-userpic", "true");

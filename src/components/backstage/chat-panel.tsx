@@ -1,11 +1,27 @@
 "use client";
 
-// Чат трансляции v2: socket.io мини-сервис (порт 3003 через XTransformPort).
-// Эмодзи 7TV/BTTV/FFZ, бейджи OWNER/MOD, инструменты модерации, команды.
+// Чат трансляции v3 «ГРАФИТ»: Twitch-подобный — бейджи ролей (владелец/
+// модератор/VIP/подписчик), кнопка «Кто в чате» (community drawer),
+// эмодзи 7TV/BTTV/FFZ, инструменты модерации, команды.
+// Панель чата не показывает счётчик «(N эмоций)».
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { Crown, Lock, SmilePlus, Sword, Trash2, Users, Zap, Ban, Clock } from "lucide-react";
+import {
+  Camera,
+  Gem,
+  Lock,
+  SmilePlus,
+  Star,
+  Sword,
+  Trash2,
+  Users,
+  Zap,
+  Ban,
+  Clock,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,7 +30,7 @@ import { cn } from "@/lib/utils";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useAutoScroll } from "@/components/backstage/hooks";
 import { toast } from "@/hooks/use-toast";
-import type { ChatMessageDto, EmoteDto } from "@/lib/types";
+import type { ChatMessageDto, ChatterDto, EmoteDto } from "@/lib/types";
 
 const CHAT_BASE = "/?XTransformPort=3003";
 
@@ -28,6 +44,42 @@ async function fetchChatJson<T>(path: string): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+// ── Бейджи ролей (Twitch-тип: цветная плашка + белая иконка) ────────────
+
+const BADGE_META: Record<string, { label: string; className: string; Icon: LucideIcon }> = {
+  owner: { label: "Владелец канала", className: "bg-[#eb0400]", Icon: Camera },
+  mod: { label: "Модератор", className: "bg-[#00a870]", Icon: Sword },
+  vip: { label: "VIP", className: "bg-[#ff77b0]", Icon: Gem },
+  sub: { label: "Платный подписчик", className: "bg-[#a970ff]", Icon: Star },
+};
+
+function BadgeChip({ badge, className }: { badge: string; className?: string }) {
+  const meta = BADGE_META[badge];
+  if (!meta) return null;
+  return (
+    <span
+      role="img"
+      aria-label={meta.label}
+      title={meta.label}
+      className={cn(
+        "inline-grid h-4 w-4 shrink-0 place-items-center rounded-[4px] align-[-3px]",
+        meta.className,
+        className
+      )}
+    >
+      <meta.Icon className="size-2.5 text-white" aria-hidden />
+    </span>
+  );
+}
+
+/** Бейджи сообщения: приоритет полю badges (v2.1 чат-сервиса), fallback на role */
+function messageBadges(m: ChatMessageDto): string[] {
+  if (Array.isArray(m.badges) && m.badges.length > 0) return m.badges;
+  if (m.role === "OWNER") return ["owner"];
+  if (m.role === "MOD") return ["mod"];
+  return [];
 }
 
 /** Разбивает текст на слова; слова-эмодзи рендерит картинками (Twitch-стиль) */
@@ -56,7 +108,7 @@ function MessageText({ text, emotes }: { text: string; emotes: EmoteMap }) {
   );
 }
 
-/** Пикер эмодзи с табами провайдеров */
+/** Пикер эмодзи с табами провайдеров (без счётчика количества) */
 function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: string) => void }) {
   const [tab, setTab] = useState<"7tv" | "bttv" | "ffz">("7tv");
   const providers: Array<"7tv" | "bttv" | "ffz"> = ["7tv", "bttv", "ffz"];
@@ -71,13 +123,12 @@ function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: st
             onClick={() => setTab(p)}
             className={cn(
               "rounded-full px-2.5 py-1 text-[11px] transition-colors",
-              tab === p ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-white/5"
+              tab === p ? "bg-white/10 text-foreground" : "text-muted-foreground hover:bg-white/5"
             )}
           >
             {p.toUpperCase()}
           </button>
         ))}
-        <span className="ml-auto self-center text-[10px] text-muted-foreground/60">{list.length}</span>
       </div>
       <div className="grid max-h-72 grid-cols-[repeat(auto-fill,minmax(2.4rem,1fr))] gap-1 overflow-y-auto p-1.5">
         {list.map((e) => (
@@ -99,6 +150,89 @@ function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: st
   );
 }
 
+// ── «Кто в чате» — community drawer (как в Twitch) ──────────────────────
+
+function ChattersDrawer({
+  chatters,
+  onClose,
+}: {
+  chatters: ChatterDto[];
+  onClose: () => void;
+}) {
+  const groups: Array<{ key: string; title: string; list: ChatterDto[] }> = [
+    { key: "owner", title: "ВЛАДЕЛЕЦ", list: chatters.filter((c) => c.badges.includes("owner")) },
+    {
+      key: "mod",
+      title: "МОДЕРАТОРЫ",
+      list: chatters.filter((c) => !c.badges.includes("owner") && c.badges.includes("mod")),
+    },
+    {
+      key: "vip",
+      title: "VIP",
+      list: chatters.filter((c) => !c.badges.includes("owner") && !c.badges.includes("mod") && c.badges.includes("vip")),
+    },
+    {
+      key: "sub",
+      title: "ПОДПИСЧИКИ",
+      list: chatters.filter(
+        (c) => !c.badges.includes("owner") && !c.badges.includes("mod") && !c.badges.includes("vip") && c.badges.includes("sub")
+      ),
+    },
+    { key: "viewers", title: "ЗРИТЕЛИ", list: chatters.filter((c) => c.badges.length === 0) },
+  ].filter((g) => g.list.length > 0);
+
+  return (
+    <div className="absolute inset-0 z-20 flex flex-col bg-[#0f0f13]/[.97] backdrop-blur-sm" role="dialog" aria-label="Кто сейчас в чате">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-white/5 px-3.5">
+        <Users className="size-4 text-muted-foreground" aria-hidden />
+        <h2 className="label-caps text-[12px]">ЗРИТЕЛИ — {chatters.length}</h2>
+        <button
+          onClick={onClose}
+          aria-label="Закрыть список зрителей"
+          className="ml-auto grid size-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+        {groups.length === 0 && (
+          <p className="label-caps py-8 text-center text-[11px] text-muted-foreground/60">Пока никого нет</p>
+        )}
+        {groups.map((g) => (
+          <section key={g.key} className="mb-1.5">
+            <h3 className="label-caps px-2 py-1.5 text-[10px] text-muted-foreground">
+              {g.title} — {g.list.length}
+            </h3>
+            {g.list.map((c) => (
+              <div key={c.uid} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/[.04]">
+                <Avatar className="size-6 rounded-full ring-1 ring-white/10">
+                  <AvatarImage src={c.avatar ?? undefined} alt={c.name} />
+                  <AvatarFallback
+                    style={{ backgroundColor: `${c.color}26`, color: c.color }}
+                    className="rounded-full text-[10px] font-semibold"
+                  >
+                    {c.name.slice(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                {c.badges.length > 0 && (
+                  <span className="inline-flex items-center gap-0.5">
+                    {c.badges.map((b) => (
+                      <BadgeChip key={b} badge={b} />
+                    ))}
+                  </span>
+                )}
+                <span className="min-w-0 truncate text-sm font-bold" style={{ color: c.color }}>
+                  {c.name}
+                </span>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ChatPanel({ channelSlug, className }: { channelSlug: string; className?: string }) {
   const user = useBackstageStore((s) => s.user);
   const setAuthOpen = useBackstageStore((s) => s.setAuthOpen);
@@ -114,6 +248,10 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   const [modUids, setModUids] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [target, setTarget] = useState<{ id: string; uid: string | null; name: string } | null>(null);
+
+  // «Кто в чате» (community drawer)
+  const [chatters, setChatters] = useState<ChatterDto[]>([]);
+  const [chattersOpen, setChattersOpen] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const { ref, pending, scrollToBottom } = useAutoScroll(messages);
@@ -164,12 +302,14 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   }, [channelSlug, connected]);
 
   // ── Подключение к чат-сервису ──────────────────────────────────────────
+  // Гость (без токена) подключается в read-only watch-режиме (как оверлей):
+  // публичный эфир → чат читается без входа, писать — только после входа.
+  // NB: socket.io-client ИГНОРИРУЕТ opts.query, если query задан в самом URL —
+  // поэтому XTransformPort передаётся строго через opts.query (не в CHAT_BASE).
   useEffect(() => {
-    if (!token) return;
-
-    // Подключение строго через XTransformPort (шлюз Caddy), путь /
-    const socket = io(CHAT_BASE, {
-      auth: { token },
+    const socket = io("/", {
+      auth: token ? { token } : undefined,
+      query: token ? { XTransformPort: 3003 } : { XTransformPort: 3003, watch: 1 },
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
@@ -210,6 +350,12 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       if (data.channelSlug === channelSlug) setViewers(data.count);
     });
 
+    // «Кто в чате»: живой список от чат-сервиса
+    socket.on("chatters:update", (data: { channelSlug: string; chatters: ChatterDto[] }) => {
+      if (data.channelSlug !== channelSlug) return;
+      setChatters(data.chatters);
+    });
+
     socket.on("system:error", (data: { code: string; message: string }) => {
       if (data.code === "rate_limited" || data.code === "banned" || data.code === "forbidden") {
         toast({ title: "Чат", description: data.message, variant: "destructive" });
@@ -224,6 +370,19 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       setMessages([]);
     };
   }, [token, channelSlug, scrollToBottom]);
+
+  // ── Стартовый список «кто в чате» (REST, до первого события сокета) ────
+  useEffect(() => {
+    let alive = true;
+    void fetchChatJson<{ chatters: ChatterDto[] }>(`/api/chatters?channel=${encodeURIComponent(channelSlug)}`).then(
+      (d) => {
+        if (alive && d?.chatters) setChatters(d.chatters);
+      }
+    );
+    return () => {
+      alive = false;
+    };
+  }, [channelSlug, connected]);
 
   // ── Отправка ───────────────────────────────────────────────────────────
   const send = useCallback(() => {
@@ -242,13 +401,10 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
     [channelSlug, canSend]
   );
 
-  const insertEmote = useCallback(
-    (name: string) => {
-      setDraft((d) => (d.length === 0 || d.endsWith(" ") ? `${d}${name} ` : `${d} ${name} `));
-      setPickerOpen(false);
-    },
-    []
-  );
+  const insertEmote = useCallback((name: string) => {
+    setDraft((d) => (d.length === 0 || d.endsWith(" ") ? `${d}${name} ` : `${d} ${name} `));
+    setPickerOpen(false);
+  }, []);
 
   const list = useMemo(() => messages.slice(-100), [messages]);
   const showCommandHint =
@@ -257,27 +413,29 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   return (
     <section
       aria-label="Чат трансляции"
-      className={cn("flex h-full min-h-0 flex-col overflow-hidden bg-[#0d0d12]/60", className)}
+      className={cn("relative flex h-full min-h-0 flex-col overflow-hidden bg-[#0d0d12]/60", className)}
     >
-      {/* Заголовок */}
+      {/* Заголовок: название + «Кто в чате» (как в Twitch) */}
       <header className="label-caps glass flex h-12 shrink-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-3.5 text-[12px]">
         <h2 className="headline text-[12px]">ЧАТ</h2>
-        {emotes.length > 0 && (
-          <span className="rounded-full bg-white/5 px-2 py-px text-[10px] text-muted-foreground" title="7TV · BTTV · FFZ">
-            {emotes.length} ЭМОЦИЙ
-          </span>
-        )}
-        <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5" title="Зрителей в чате">
-            <Users className="size-3.5" aria-hidden />
-            {viewers}
-          </span>
-          <span
-            className={cn("size-2 rounded-full", connected ? "bg-[#5ad1a4] live-dot" : "bg-muted-foreground/40")}
-            aria-label={connected ? "Чат подключён" : "Чат отключён"}
-            title={connected ? "Подключено" : "Переподключение…"}
-          />
-        </span>
+        <button
+          onClick={() => setChattersOpen((v) => !v)}
+          aria-label="Кто сейчас в чате"
+          aria-pressed={chattersOpen}
+          title="Кто сейчас в чате"
+          className={cn(
+            "ml-auto flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] transition-colors",
+            chattersOpen ? "bg-white/10 text-foreground" : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+          )}
+        >
+          <Users className="size-3.5" aria-hidden />
+          {chatters.length > 0 ? chatters.length : viewers}
+        </button>
+        <span
+          className={cn("size-2 rounded-full", connected ? "bg-[#5ad1a4] live-dot" : "bg-muted-foreground/40")}
+          aria-label={connected ? "Чат подключён" : "Чат отключён"}
+          title={connected ? "Подключено" : "Переподключение…"}
+        />
       </header>
 
       {/* Сообщения */}
@@ -291,13 +449,13 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
           {list.length === 0 && (
             <div className="grid h-full place-items-center">
               <p className="label-caps max-w-52 text-center text-[11px] text-muted-foreground/60">
-                {user ? "Сообщений пока нет" : "Войдите, чтобы читать чат"}
+                {connected ? "Сообщений пока нет" : "Подключаемся к чату…"}
               </p>
             </div>
           )}
           {list.map((m) =>
             m.system ? (
-              <div key={m.id} className="fade-up px-2 py-1.5 text-center text-xs italic text-primary/85">
+              <div key={m.id} className="fade-up px-2 py-1.5 text-center text-xs italic text-muted-foreground">
                 {m.text}
               </div>
             ) : (
@@ -322,17 +480,12 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
                   </AvatarFallback>
                 </Avatar>
                 <p className="min-w-0 flex-1 break-words">
-                  {m.role === "OWNER" && (
-                    <Crown
-                      className="mr-1 inline size-3.5 -translate-y-px text-[#ffb86b]"
-                      aria-label="Владелец канала"
-                    />
-                  )}
-                  {m.role === "MOD" && (
-                    <Sword
-                      className="mr-1 inline size-3.5 -translate-y-px text-[#5ad1a4]"
-                      aria-label="Модератор"
-                    />
+                  {messageBadges(m).length > 0 && (
+                    <span className="mr-1 inline-flex items-center gap-0.5 align-[1px]">
+                      {messageBadges(m).map((b) => (
+                        <BadgeChip key={b} badge={b} />
+                      ))}
+                    </span>
                   )}
                   <span className="mr-1.5 font-bold" style={{ color: m.color }}>
                     {m.name}
@@ -344,10 +497,13 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
           )}
         </div>
 
-        {pending > 0 && (
+        {/* «Кто в чате» — поверх сообщений */}
+        {chattersOpen && <ChattersDrawer chatters={chatters} onClose={() => setChattersOpen(false)} />}
+
+        {pending > 0 && !chattersOpen && (
           <button
             onClick={scrollToBottom}
-            className="btn-gradient glow-primary label-caps absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3.5 py-1.5 text-[11px] text-white"
+            className="btn-gradient glow-primary label-caps absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3.5 py-1.5 text-[11px]"
           >
             {pending} НОВЫХ ↓
           </button>
@@ -358,7 +514,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       {target && isMod && (
         <div className="fade-up shrink-0 border-t border-white/5 bg-white/[.03] px-2.5 py-2">
           <div className="label-caps flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Sword className="size-3.5 text-[#5ad1a4]" aria-hidden />
+            <Sword className="size-3.5 text-[#00a870]" aria-hidden />
             МОДЕРАЦИЯ · {target.name}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -441,7 +597,7 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
           </Button>
         ) : !canSend ? (
           <div className="label-caps glass flex items-center gap-2 rounded-full px-4 py-2.5 text-[11px] text-muted-foreground">
-            <Crown className="size-4 shrink-0 text-primary" />
+            <Star className="size-4 shrink-0 text-muted-foreground" />
             ЧАТ ДОСТУПЕН ТОЛЬКО ПОДПИСЧИКАМ
           </div>
         ) : (
@@ -459,14 +615,14 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
                 placeholder="НАПИСАТЬ СООБЩЕНИЕ…"
                 aria-label="Сообщение в чат"
                 maxLength={500}
-                className="label-caps rounded-full border-white/10 bg-white/[.05] pr-10 text-[12px] placeholder:text-muted-foreground/50 focus-visible:ring-primary/60"
+                className="label-caps rounded-full border-white/10 bg-white/[.05] pr-10 text-[12px] placeholder:text-muted-foreground/50 focus-visible:ring-white/40"
               />
               <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
                     aria-label="Эмодзи"
-                    className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-primary"
+                    className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
                   >
                     <SmilePlus className="size-4" />
                   </button>

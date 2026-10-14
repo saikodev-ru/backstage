@@ -45,7 +45,7 @@ export function SmartImage({
           aria-hidden
           className="absolute inset-0"
           style={{
-            background: `radial-gradient(120% 120% at 30% 20%, ${(accent ?? "#a970ff") + "40"} 0%, #16161c 55%), linear-gradient(160deg, #1a1a22 0%, #121217 100%)`,
+            background: "radial-gradient(120% 120% at 30% 20%, #232329 0%, #141418 55%), linear-gradient(160deg, #1a1a1f 0%, #101014 100%)",
           }}
         />
       )}
@@ -71,8 +71,7 @@ export function SmartImage({
       {failed && label && (
         <span
           aria-hidden
-          className="absolute inset-0 grid place-items-center text-4xl font-black tracking-tight opacity-30"
-          style={{ color: accent ?? "#a970ff" }}
+          className="absolute inset-0 grid place-items-center text-4xl font-black tracking-tight text-[#d6d6de] opacity-30"
         >
           {label.slice(0, 1).toUpperCase()}
         </span>

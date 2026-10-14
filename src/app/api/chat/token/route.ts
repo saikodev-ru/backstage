@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, toPublicUser } from "@/lib/auth";
 import { issueChatToken } from "@/lib/chat-token";
 
 export const dynamic = "force-dynamic";
@@ -10,5 +10,5 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  return NextResponse.json({ token: issueChatToken(user) });
+  return NextResponse.json({ token: issueChatToken(toPublicUser(user)) });
 }

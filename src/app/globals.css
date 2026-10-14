@@ -47,85 +47,86 @@
 }
 
 /*
- * BACKSTAGE «GLASS ARENA» v2
- * Apple-стекло × Twitch-эфир × дерзость: глубокий чёрный, aurora-подсветка,
- * лавандовый градиент, огромная типографика Unbounded, glow-акценты.
- * Приложение тёмное по умолчанию (светлой темы нет).
+ * BACKSTAGE «ГРАФИТ» v3
+ * Шершавый тёмный графит без цветовых акцентов: монохром, зерно, минимум
+ * оконтовки. Цвет допускается только функционально: красный LIVE-индикатор
+ * и бейджи ролей чата (как в Twitch). Приложение тёмное по умолчанию.
  */
 :root {
-  --radius: 1rem;
+  --radius: 0.75rem;
   color-scheme: dark;
 
-  /* глубокий почти-чёрный канвас */
-  --background: #09090d;
-  --foreground: #f4f4f8;
-  --card: #111116;
-  --card-foreground: #f4f4f8;
-  --popover: #16161d;
-  --popover-foreground: #f4f4f8;
+  /* шершавый тёмный графит-канвас */
+  --background: #101013;
+  --foreground: #f4f4f6;
+  --card: #16161a;
+  --card-foreground: #f4f4f6;
+  --popover: #1a1a1f;
+  --popover-foreground: #f4f4f6;
 
-  /* электрическая лаванда */
-  --primary: #a970ff;
-  --primary-foreground: #ffffff;
-  --secondary: #1d1d25;
-  --secondary-foreground: #ececf2;
-  --muted: #1a1a21;
-  --muted-foreground: #9d9dac;
-  --accent: #221c33;
-  --accent-foreground: #d9c6ff;
+  /* primary — почти-белый (кнопки Twitch-типа: белая заливка, тёмный текст) */
+  --primary: #ececf1;
+  --primary-foreground: #101014;
+  --secondary: #1c1c21;
+  --secondary-foreground: #e8e8ec;
+  --muted: #1a1a20;
+  --muted-foreground: #9a9aa4;
+  --accent: #202026;
+  --accent-foreground: #d6d6de;
   --destructive: #e5484d;
-  --border: rgba(255, 255, 255, 0.09);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #a970ff;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #c9c9d2;
 
+  /* единственный разрешённый акцент — красный LIVE */
   --live: #eb0400;
-  --graphite: #0b0b0f;
+  --graphite: #121215;
 
-  --chart-1: #a970ff;
-  --chart-2: #5ad1a4;
-  --chart-3: #ffb86b;
-  --chart-4: #ff7bac;
-  --chart-5: #7bd3ff;
+  --chart-1: #d6d6de;
+  --chart-2: #9a9aa4;
+  --chart-3: #6f6f78;
+  --chart-4: #4a4a52;
+  --chart-5: #33333a;
 
-  --sidebar: #0c0c11;
-  --sidebar-foreground: #f4f4f8;
-  --sidebar-primary: #a970ff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #221c33;
-  --sidebar-accent-foreground: #d9c6ff;
-  --sidebar-border: rgba(255, 255, 255, 0.07);
-  --sidebar-ring: #a970ff;
+  --sidebar: #121215;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #ececf1;
+  --sidebar-primary-foreground: #101014;
+  --sidebar-accent: #202026;
+  --sidebar-accent-foreground: #d6d6de;
+  --sidebar-border: rgba(255, 255, 255, 0.05);
+  --sidebar-ring: #c9c9d2;
 }
 
 .dark {
-  --background: #09090d;
-  --foreground: #f4f4f8;
-  --card: #111116;
-  --card-foreground: #f4f4f8;
-  --popover: #16161d;
-  --popover-foreground: #f4f4f8;
-  --primary: #a970ff;
-  --primary-foreground: #ffffff;
-  --secondary: #1d1d25;
-  --secondary-foreground: #ececf2;
-  --muted: #1a1a21;
-  --muted-foreground: #9d9dac;
-  --accent: #221c33;
-  --accent-foreground: #d9c6ff;
+  --background: #101013;
+  --foreground: #f4f4f6;
+  --card: #16161a;
+  --card-foreground: #f4f4f6;
+  --popover: #1a1a1f;
+  --popover-foreground: #f4f4f6;
+  --primary: #ececf1;
+  --primary-foreground: #101014;
+  --secondary: #1c1c21;
+  --secondary-foreground: #e8e8ec;
+  --muted: #1a1a20;
+  --muted-foreground: #9a9aa4;
+  --accent: #202026;
+  --accent-foreground: #d6d6de;
   --destructive: #e5484d;
-  --border: rgba(255, 255, 255, 0.09);
-  --input: rgba(255, 255, 255, 0.1);
-  --ring: #a970ff;
+  --border: rgba(255, 255, 255, 0.06);
+  --input: rgba(255, 255, 255, 0.08);
+  --ring: #c9c9d2;
   --live: #eb0400;
-  --graphite: #0b0b0f;
-  --sidebar: #0c0c11;
-  --sidebar-foreground: #f4f4f8;
-  --sidebar-primary: #a970ff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #221c33;
-  --sidebar-accent-foreground: #d9c6ff;
-  --sidebar-border: rgba(255, 255, 255, 0.07);
-  --sidebar-ring: #a970ff;
+  --graphite: #121215;
+  --sidebar: #121215;
+  --sidebar-foreground: #f4f4f6;
+  --sidebar-primary: #ececf1;
+  --sidebar-primary-foreground: #101014;
+  --sidebar-accent: #202026;
+  --sidebar-accent-foreground: #d6d6de;
+  --sidebar-border: rgba(255, 255, 255, 0.05);
+  --sidebar-ring: #c9c9d2;
 }
 
 @layer base {
@@ -136,108 +137,149 @@
     scrollbar-gutter: stable;
   }
   ::selection {
-    background: rgba(169, 112, 255, 0.35);
+    background: rgba(244, 244, 246, 0.22);
   }
   body {
     @apply bg-background text-foreground;
   }
 
-  /* aurora: два фиксированных лавандовых свечения — «арена» под стеклом */
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    z-index: -2;
-    pointer-events: none;
-    background:
-      radial-gradient(52rem 30rem at 12% -8%, rgba(139, 92, 246, 0.16) 0%, rgba(139, 92, 246, 0) 60%),
-      radial-gradient(44rem 26rem at 96% 4%, rgba(169, 112, 255, 0.1) 0%, rgba(169, 112, 255, 0) 55%),
-      radial-gradient(60rem 40rem at 50% 118%, rgba(93, 52, 160, 0.12) 0%, rgba(93, 52, 160, 0) 60%);
-  }
-
-  /* лёгкое киношное зерно поверх интерфейса */
+  /* шершавость: киношное зерно поверх интерфейса (без цветных подсветок) */
   body::after {
     content: "";
     position: fixed;
     inset: 0;
     z-index: 90;
     pointer-events: none;
-    opacity: 0.038;
+    opacity: 0.055;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 160px 160px;
     mix-blend-mode: overlay;
   }
 }
 
-/* ── Скроллбары ───────────────────────────────────────────────────────── */
+/* ── Скроллбары (нейтральный графит) ──────────────────────────────────── */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(169, 112, 255, 0.25) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(169, 112, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(169, 112, 255, 0.4);
+  background: rgba(255, 255, 255, 0.26);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 
-/* ── Стеклянные поверхности (Apple) ───────────────────────────────────── */
+/* ── Поверхности: матовый графит (минимум оконтовки) ─────────────────── */
 .glass {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 .glass-strong {
-  background: rgba(14, 14, 19, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  backdrop-filter: blur(24px) saturate(1.6);
-  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  background: rgba(18, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
-/* ── Glow-эффекты (дерзость) ──────────────────────────────────────────── */
+/* ── Тени: глубокие нейтральные (никаких цветных glow) ────────────────── */
 .glow-primary {
   box-shadow:
-    0 10px 30px -10px rgba(169, 112, 255, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    0 12px 32px -14px rgba(0, 0, 0, 0.7),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .glow-soft {
-  box-shadow: 0 0 40px -12px rgba(169, 112, 255, 0.35);
+  box-shadow: 0 0 32px -16px rgba(0, 0, 0, 0.6);
 }
 .glow-live {
-  box-shadow: 0 0 22px -2px rgba(235, 4, 0, 0.55);
+  box-shadow: 0 0 22px -4px rgba(235, 4, 0, 0.5);
 }
 
-/* градиентный текст — логотип и акценты */
+/* логотип и акценты — сплошной светлый (без градиентов) */
 .text-gradient {
-  background: linear-gradient(94deg, #efdfff 0%, #b993ff 42%, #8b5cf6 78%, #6d3eda 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #f4f4f6;
 }
 
-/* градиентная заливка для primary-кнопок */
+/* primary-кнопка: белая заливка, тёмный текст (Twitch-тип) */
 .btn-gradient {
-  background-image: linear-gradient(135deg, #b18cff 0%, #a970ff 45%, #8b5cf6 100%);
+  background-color: #f2f2f5;
+  color: #101014;
+  background-image: none;
   transition:
-    transform 0.18s cubic-bezier(0.22, 0.61, 0.36, 1),
-    box-shadow 0.18s ease,
-    filter 0.18s ease;
+    transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1),
+    filter 0.16s ease,
+    background-color 0.16s ease;
 }
 .btn-gradient:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.08);
+  filter: brightness(0.97);
 }
 .btn-gradient:active {
   transform: translateY(0) scale(0.985);
+}
+
+/* ── Ползунок громкости плеера (не обрезается по высоте) ──────────────── */
+.player-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  height: 16px; /* достаточная зона захвата: тач/мышь */
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+  background-color: transparent;
+  /* визуальный трек 4px по центру, заполнение — через --vol */
+  background-image: linear-gradient(
+    to right,
+    #f4f4f6 var(--vol, 70%),
+    rgba(255, 255, 255, 0.28) var(--vol, 70%)
+  );
+  background-size: 100% 4px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.player-volume::-webkit-slider-runnable-track {
+  height: 16px;
+  background: transparent;
+}
+.player-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 2px; /* (16-12)/2 — центрируем */
+  border-radius: 999px;
+  background: #f4f4f6;
+  border: none;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.6);
+  transition: transform 0.12s ease;
+}
+.player-volume:hover::-webkit-slider-thumb,
+.player-volume:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+.player-volume::-moz-range-track {
+  height: 16px;
+  background: transparent;
+}
+.player-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #f4f4f6;
+  border: none;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.6);
 }
 
 /* ── Анимации ─────────────────────────────────────────────────────────── */
@@ -258,7 +300,7 @@
   animation: live-pulse 1.6s ease-in-out infinite;
 }
 
-/* дыхание glow у LIVE-пилюли */
+/* дыхание у LIVE-пилюли */
 @keyframes live-breathe {
   0%,
   100% {
@@ -287,7 +329,7 @@
   animation: fade-up 0.32s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
-/* переход между экранами — пружинка Apple */
+/* переход между экранами */
 @keyframes view-in {
   from {
     opacity: 0;
@@ -321,23 +363,6 @@
   animation-play-state: paused;
 }
 
-/* медленное «дыхание» aurora в hero */
-@keyframes aurora-drift {
-  0%,
-  100% {
-    background-position:
-      0% 0%,
-      100% 0%,
-      50% 100%;
-  }
-  50% {
-    background-position:
-      18% 12%,
-      84% -10%,
-      42% 112%;
-  }
-}
-
 /* чат: маска сверху */
 .chat-fade-top {
   mask-image: linear-gradient(to bottom, transparent 0, black 28px);
@@ -345,7 +370,7 @@
 
 /* ── Типографика BACKSTAGE ────────────────────────────────────────────── */
 
-/* дисплейный Unbounded + капс — лого, герой, крупные заголовки */
+/* дисплей Unbounded + капс — лого, герой, крупные заголовки */
 .headline {
   font-family: var(--font-unbounded), var(--font-golos), system-ui, sans-serif;
   font-weight: 800;
@@ -354,7 +379,7 @@
   line-height: 1.08;
 }
 
-/* гигантский герой-текст (Apple large-title масштаб) */
+/* гигантский герой-текст */
 .display-hero {
   font-family: var(--font-unbounded), var(--font-golos), system-ui, sans-serif;
   font-weight: 900;
@@ -390,16 +415,16 @@
 .scrim {
   background: linear-gradient(
     to top,
-    rgba(5, 5, 8, 0.88) 0%,
-    rgba(5, 5, 8, 0.45) 38%,
-    rgba(5, 5, 8, 0.08) 66%,
-    rgba(5, 5, 8, 0) 100%
+    rgba(8, 8, 10, 0.88) 0%,
+    rgba(8, 8, 10, 0.45) 38%,
+    rgba(8, 8, 10, 0.08) 66%,
+    rgba(8, 8, 10, 0) 100%
   );
 }
 
 /* blur-up для картинок */
 img.blur-up {
-  filter: blur(16px) saturate(1.1);
+  filter: blur(16px);
   transform: scale(1.04);
   transition:
     filter 0.5s ease-out,

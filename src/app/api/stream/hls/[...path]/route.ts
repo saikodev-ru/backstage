@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, toPublicUser } from "@/lib/auth";
 import { OWNCast_BASE_URL, channelOwncastBase } from "@/lib/owncast";
 import { viewerCanWatch } from "@/lib/access";
 
@@ -91,7 +91,7 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
 
   if (gate.access === "private") {
     const user = await getSessionUser();
-    const allowed = await viewerCanWatch(user, gate);
+    const allowed = await viewerCanWatch(user ? toPublicUser(user) : null, gate);
     if (!user || !allowed) {
       return NextResponse.json(
         { error: "subscription_required", message: "Трансляция доступна платным подписчикам" },
@@ -107,7 +107,12 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
     const res = await fetch(upstream, {
       method: req.method === "HEAD" ? "HEAD" : "GET",
       cache: "no-store",
-      headers: { accept: "*/*" },
+      headers: {
+        accept: "*/*",
+        // ВАЖНО: identity — иначе undici распаковывает gzip, а скопированный
+        // content-length (длина сжатого тела) обрежет плейлист/сегмент
+        "accept-encoding": "identity",
+      },
       signal: AbortSignal.timeout(15_000),
     });
 
@@ -118,7 +123,8 @@ async function proxy(req: NextRequest, ctx: Ctx): Promise<Response> {
     // Плейлисты — всегда свежие; сегменты пусть браузер кэширует недолго
     headers.set("cache-control", rel.endsWith(".m3u8") ? "no-store" : "public, max-age=6");
     const len = res.headers.get("content-length");
-    if (len) headers.set("content-length", len);
+    // Копируем длину только если тело не было перекодировано (content-encoding отсутствует)
+    if (len && !res.headers.get("content-encoding")) headers.set("content-length", len);
     if (res.headers.get("accept-ranges")) headers.set("accept-ranges", res.headers.get("accept-ranges")!);
 
     return new Response(res.status === 204 || req.method === "HEAD" ? null : res.body, {

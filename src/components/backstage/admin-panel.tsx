@@ -5,9 +5,12 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Ban as BanIcon,
+  Check,
   Copy,
+  Globe,
   KeyRound,
   Loader2,
+  Lock,
   MonitorPlay,
   Play,
   Plus,
@@ -37,6 +40,8 @@ import type { PublicChannel } from "@/lib/types";
 
 type BanRow = { uid: string; name: string; reason: string; until: number };
 type ModRow = { uid: string; name: string };
+/** Реестр Telegram-каналов платных подписок (приватные эфиры). */
+type TgChannelRow = { id: string; title: string; chatId: string; link: string | null; note: string | null };
 
 type Draft = {
   name: string;
@@ -200,6 +205,81 @@ export function AdminPanel() {
     setDrafts((prev) => ({ ...prev, [current.slug]: { ...prev[current.slug], ...patch } }));
   }, [current]);
 
+  // ── Запуск эфира: «приватный ли эфир?» + выбор ТГК (кор-изменение) ──
+  const [startOpen, setStartOpen] = useState(false);
+  const [startMode, setStartMode] = useState<"start" | "edit">("start");
+  const [startPrivate, setStartPrivate] = useState(false);
+  const [tgChannels, setTgChannels] = useState<TgChannelRow[]>([]);
+  const [startTgId, setStartTgId] = useState<string | null>(null);
+  const [startBusy, setStartBusy] = useState(false);
+
+  const openStartDialog = useCallback(
+    (mode: "start" | "edit") => {
+      if (!current) return;
+      setStartMode(mode);
+      setStartPrivate(current.access === "private");
+      setStartTgId(current.requiredTelegramChatId ?? null);
+      setStartOpen(true);
+    },
+    [current]
+  );
+
+  // Реестр ТГК подтягивается при открытии диалога
+  useEffect(() => {
+    if (!startOpen) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/telegram-channels", { cache: "no-store" });
+        if (!res.ok) return;
+        const d = (await res.json()) as { telegramChannels?: TgChannelRow[] };
+        if (alive && d.telegramChannels) setTgChannels(d.telegramChannels);
+      } catch {
+        /* реестр недоступен */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [startOpen]);
+
+  const applyAccessMode = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/channels/${current.slug}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        access: startPrivate ? "private" : "public",
+        requiredTelegramChatId: startPrivate ? (startTgId ?? "") : "",
+      }),
+    });
+    const data = (await res.json()) as { channel?: PublicChannel; message?: string };
+    if (!res.ok || !data.channel) throw new Error(data.message ?? "Не удалось применить режим доступа");
+    patchChannel(current.slug, data.channel);
+  }, [current, startPrivate, startTgId, patchChannel]);
+
+  const confirmStart = useCallback(async () => {
+    setStartBusy(true);
+    try {
+      await applyAccessMode();
+      if (startMode === "start") {
+        await toggleDemo("start");
+      } else {
+        toast({
+          title: startPrivate ? "Эфир приватный" : "Эфир публичный",
+          description: startPrivate
+            ? "Доступ — только платным подписчикам выбранного ТГК"
+            : "Эфир и чат открыты всем зрителям",
+        });
+      }
+      setStartOpen(false);
+    } catch (e) {
+      toast({ title: "Ошибка", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+    } finally {
+      setStartBusy(false);
+    }
+  }, [applyAccessMode, startMode, startPrivate, toggleDemo]);
+
   const save = useCallback(async () => {
     if (!current || !draft) return;
     setSaving(true);
@@ -312,7 +392,8 @@ export function AdminPanel() {
               {engineState ? (
                 engineState.engine.reachable ? (
                   <>
-                    <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                    {/* Статус + режим доступа эфира (публичный/приватный) */}
+                    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
                       {engineState.engine.online ? (
                         <span className="live-breathe label-caps flex items-center gap-1.5 rounded-full bg-live px-2 py-px text-[11px] text-white">
                           <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
@@ -323,18 +404,44 @@ export function AdminPanel() {
                           ОФЛАЙН
                         </span>
                       )}
-                      <span className="text-xs text-muted-foreground">
-                        Статус приходит из движка: эфир = RTMP-пуш из OBS
+                      <span
+                        className={cn(
+                          "label-caps flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px]",
+                          current.access === "private"
+                            ? "bg-white/[.07] text-foreground"
+                            : "bg-secondary text-muted-foreground"
+                        )}
+                        title={
+                          current.access === "private"
+                            ? "Доступ только платным подписчикам ТГК"
+                            : "Эфир открыт всем"
+                        }
+                      >
+                        {current.access === "private" ? <Lock className="size-3" /> : <Globe className="size-3" />}
+                        {current.access === "private" ? "ПРИВАТНЫЙ" : "ПУБЛИЧНЫЙ"}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="label-caps h-7 px-2.5 text-[10px] text-muted-foreground hover:text-foreground"
+                        onClick={() => openStartDialog("edit")}
+                      >
+                        ИЗМЕНИТЬ
+                      </Button>
+                      <span className="ml-auto hidden text-xs text-muted-foreground lg:inline">
+                        Эфир = RTMP-пуш из OBS
                       </span>
                     </div>
 
-                    {/* Демо-эфир */}
-                    <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                    {/* Демо-эфир: старт через диалог «приватный ли эфир?» */}
+                    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
                       <Button
                         variant={engineState.running ? "destructive" : "default"}
                         size="sm"
                         disabled={demoBusy}
-                        onClick={() => void toggleDemo(engineState.running ? "stop" : "start")}
+                        onClick={() =>
+                          engineState.running ? void toggleDemo("stop") : openStartDialog("start")
+                        }
                         className="label-caps gap-2"
                       >
                         {demoBusy ? (
@@ -344,10 +451,11 @@ export function AdminPanel() {
                         ) : (
                           <Play className="size-4" />
                         )}
-                        {engineState.running ? "ОСТАНОВИТЬ ДЕМО-ЭФИР" : "ДЕМО-ЭФИР (FFMPEG)"}
+                        {engineState.running ? "ОСТАНОВИТЬ ЭФИР" : "ЗАПУСТИТЬ ЭФИР…"}
                       </Button>
-                      <p className="text-xs leading-snug text-muted-foreground">
-                        ffmpeg пушит тестовый поток в RTMP — проверка всего конвейера без OBS
+                      <p className="min-w-40 flex-1 text-xs leading-snug text-muted-foreground">
+                        Перед запуском спросим: приватный ли эфир (и какой ТГК нужен в подписках). ffmpeg
+                        пушит тестовый поток в RTMP — проверка конвейера без OBS.
                       </p>
                     </div>
                   </>
@@ -622,6 +730,102 @@ GET  /api/chstate?channel=${current.slug}&XTransformPort=3003`}
             Slug и stream key генерируются автоматически
           </p>
         </div>
+
+        {/* Диалог запуска эфира: «приватный ли эфир?» + выбор ТГК из реестра */}
+        <Dialog open={startOpen} onOpenChange={setStartOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="headline flex items-center gap-2 text-base">
+                <Play className="size-5" />
+                {startMode === "start" ? "ЗАПУСК ЭФИРА" : "РЕЖИМ ДОСТУПА ЭФИРА"}
+              </DialogTitle>
+              <DialogDescription>
+                {startMode === "start"
+                  ? "Перед стартом выберите: приватный ли это эфир."
+                  : "Публичный эфир открыт всем; приватный — только платным подписчикам Telegram-канала."}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-secondary/40 px-3.5 py-3">
+              <Switch
+                id="start-private"
+                checked={startPrivate}
+                onCheckedChange={setStartPrivate}
+                aria-label="Приватный эфир"
+              />
+              <Label htmlFor="start-private" className="cursor-pointer">
+                <span className="label-caps flex items-center gap-1.5 text-sm">
+                  <Lock className="size-4" />
+                  ПРИВАТНЫЙ ЭФИР
+                </span>
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  {startPrivate
+                    ? "Доступ и чат — только платным подписчикам ТГК"
+                    : "Эфир и чат открыты всем зрителям"}
+                </span>
+              </Label>
+            </div>
+
+            {startPrivate && (
+              <div className="space-y-2">
+                <p className="label-caps text-[11px] text-muted-foreground">
+                  TELEGRAM-КАНАЛ, КОТОРЫЙ ДОЛЖЕН БЫТЬ В ПОДПИСКАХ ЗРИТЕЛЯ
+                </p>
+                <div className="max-h-48 space-y-1.5 overflow-y-auto">
+                  {tgChannels.length === 0 && (
+                    <p className="rounded-lg bg-secondary/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                      Реестр пуст. Добавьте ТГК через Bot API или оставьте пустым — тогда будет использован
+                      основной канал из настроек сервера.
+                    </p>
+                  )}
+                  {tgChannels.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setStartTgId(t.id)}
+                      aria-pressed={startTgId === t.id}
+                      className={cn(
+                        "flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+                        startTgId === t.id
+                          ? "border-white/20 bg-white/[.06]"
+                          : "border-border hover:bg-white/[.03]"
+                      )}
+                    >
+                      <Check className={cn("size-4 shrink-0", startTgId === t.id ? "opacity-100" : "opacity-0")} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{t.title}</span>
+                        <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                          {t.chatId || "основной (env)"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Платформа проверит подписку зрителя на выбранный канал через бота при входе на эфир.
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                className="label-caps ml-auto rounded-full"
+                onClick={() => setStartOpen(false)}
+                disabled={startBusy}
+              >
+                ОТМЕНА
+              </Button>
+              <Button
+                className="btn-gradient glow-primary label-caps gap-2 rounded-full px-5"
+                disabled={startBusy}
+                onClick={() => void confirmStart()}
+              >
+                {startBusy ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+                {startMode === "start" ? "НАЧАТЬ ЭФИР" : "ПРИМЕНИТЬ"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );

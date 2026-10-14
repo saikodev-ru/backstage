@@ -86,8 +86,8 @@ function PlayOverlay({ size = "md" }: { size?: "md" | "lg" }) {
     <span className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
       <span
         className={cn(
-          "grid place-items-center rounded-full bg-primary/90 text-white opacity-0 backdrop-blur-sm transition-all duration-300 group-hover:scale-105 group-hover:opacity-100",
-          "shadow-[0_0_36px_rgba(169,112,255,0.6)]",
+          "grid place-items-center rounded-full bg-[#101014]/85 text-white opacity-0 backdrop-blur-md transition-all duration-300 group-hover:scale-105 group-hover:opacity-100",
+          "shadow-[0_16px_40px_-12px_rgba(0,0,0,0.85)] ring-1 ring-white/15",
           size === "lg" ? "size-18" : "size-12"
         )}
       >
@@ -107,7 +107,7 @@ export function LiveChannelCard({ channel, hero = false }: { channel: PublicChan
     <button
       onClick={() => openChannel(channel.slug)}
       className={cn(
-        "group relative block w-full overflow-hidden rounded-3xl text-left ring-1 ring-white/10 transition-all duration-300 hover:ring-primary/50 hover:shadow-[0_20px_60px_-20px_rgba(169,112,255,0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        "group relative block w-full overflow-hidden rounded-3xl text-left ring-1 ring-white/10 transition-all duration-300 hover:ring-white/20 hover:shadow-[0_20px_60px_-20px_rgba(0,0,0,0.75)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
         hero && "fade-up"
       )}
       aria-label={`${channel.name}: ${channel.liveTitle ?? "в эфире"}`}
@@ -130,8 +130,7 @@ export function LiveChannelCard({ channel, hero = false }: { channel: PublicChan
           <Avatar className={cn("shrink-0 rounded-2xl ring-2 ring-white/20", hero ? "size-12 sm:size-14" : "size-10")}>
             <AvatarImage src={channel.avatarUrl ?? undefined} alt={channel.name} />
             <AvatarFallback
-              style={{ backgroundColor: `${channel.accentColor}33`, color: channel.accentColor }}
-              className="rounded-2xl text-lg font-black"
+              className="rounded-2xl bg-[#1c1c21] text-lg font-black text-[#d6d6de]"
             >
               {channel.name.slice(0, 1).toUpperCase()}
             </AvatarFallback>

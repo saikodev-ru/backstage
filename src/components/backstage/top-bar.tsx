@@ -24,16 +24,16 @@ export function BrandMark({ withText = true }: { withText?: boolean }) {
     <span className="flex select-none items-center gap-2.5">
       <span
         aria-hidden
-        className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-[#c9a4ff] via-[#a970ff] to-[#6d3eda] shadow-[0_0_22px_rgba(169,112,255,0.45)]"
+        className="grid size-9 place-items-center rounded-xl bg-[#f2f2f5] text-[#101014] shadow-[0_8px_24px_-12px_rgba(0,0,0,0.8)]"
       >
-        <svg viewBox="0 0 24 24" className="size-4.5 text-white" fill="currentColor">
+        <svg viewBox="0 0 24 24" className="size-4.5" fill="currentColor">
           <path d="M9.5 7.6v8.8c0 .8.9 1.3 1.6.9l7-4.4c.6-.4.6-1.4 0-1.8l-7-4.4c-.7-.4-1.6.1-1.6.9Z" />
           <path d="M4 8.5c.6 0 1 .4 1 1v5c0 .6-.4 1-1 1s-1-.4-1-1v-5c0-.6.4-1 1-1Z" opacity=".55" />
         </svg>
       </span>
       {withText && (
-        <span className="brand text-base sm:text-lg" aria-label="BACKSTAGE">
-          BACK<span className="text-gradient">STAGE</span>
+        <span className="brand text-base text-foreground sm:text-lg" aria-label="BACKSTAGE">
+          BACKSTAGE
         </span>
       )}
     </span>
