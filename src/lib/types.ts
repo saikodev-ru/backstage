@@ -145,3 +145,14 @@ export type TelegramChannelDto = {
   link: string | null;
   note: string | null;
 };
+
+/** Панель «О канале» (Twitch-подобные панели под трансляцией) */
+export type ChannelPanelDto = {
+  id: string;
+  title: string;
+  body: string | null;
+  imageUrl: string | null;
+  link: string | null;
+  linkLabel: string | null;
+  sortOrder: number;
+};

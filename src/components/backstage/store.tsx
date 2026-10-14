@@ -7,7 +7,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import { createStore, useStore, type StoreApi } from "zustand";
 import type { PublicChannel, PublicUser } from "@/lib/types";
 
-export type View = "live" | "home" | "clips" | "recordings" | "collabs" | "schedule";
+export type View = "live" | "home" | "clips" | "recordings" | "collabs" | "schedule" | "settings";
 
 type AppState = {
   view: View;

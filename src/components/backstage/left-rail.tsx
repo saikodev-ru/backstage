@@ -313,21 +313,29 @@ export function LeftRail() {
         role="navigation"
         aria-label="Основная навигация"
         className={cn(
-          "sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 bg-sidebar/60 backdrop-blur-xl transition-[width] duration-200 ease-out lg:flex",
+          "sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 transition-[width] duration-200 ease-out lg:flex",
           compact ? "w-[72px]" : "w-[264px]",
         )}
       >
-        {/* Тумблер режима */}
+        {/* Тумблер режима: компакт — по центру; развёрнут — «ДЛЯ ВАС» слева, сворачивание справа */}
         <div
-          className={cn("flex h-14 shrink-0 items-center", compact ? "justify-center" : "justify-end px-3")}
+          className={cn("flex h-14 shrink-0 items-center", compact ? "justify-center" : "pr-3")}
         >
+          {!compact && (
+            <h2 className="label-caps pl-4 text-[13px] text-zinc-100" aria-hidden>
+              Для вас
+            </h2>
+          )}
           <RailTip label={compact ? "Развернуть" : "Свернуть"}>
             <button
               type="button"
               onClick={toggle}
               aria-label={compact ? "Развернуть сайдбар" : "Свернуть сайдбар"}
               aria-expanded={!compact}
-              className="grid size-10 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[.04] hover:text-zinc-100"
+              className={cn(
+                "grid size-10 place-items-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[.04] hover:text-zinc-100",
+                !compact && "ml-auto",
+              )}
             >
               {compact ? (
                 <PanelLeftOpen className="size-[22px]" aria-hidden />

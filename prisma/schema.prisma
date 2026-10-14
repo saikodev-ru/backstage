@@ -154,3 +154,18 @@ model Collab {
   plannedAt   DateTime?
   createdAt   DateTime @default(now())
 }
+
+// ─── Панели «О канале» (Twitch-подобные карточки под трансляцией) ──────────
+model ChannelPanel {
+  id          String   @id @default(cuid())
+  channelSlug String
+  title       String
+  body        String?
+  imageUrl    String?
+  link        String?
+  linkLabel   String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([channelSlug, sortOrder])
+}

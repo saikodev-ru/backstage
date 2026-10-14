@@ -14,6 +14,7 @@ import { ClipsView } from "@/components/backstage/views/clips-view";
 import { RecordingsView } from "@/components/backstage/views/recordings-view";
 import { ScheduleView } from "@/components/backstage/views/schedule-view";
 import { CollabsView } from "@/components/backstage/views/collabs-view";
+import { SettingsView } from "@/components/backstage/views/settings-view";
 import { AuthDialog } from "@/components/backstage/auth-dialog";
 import { AdminPanel } from "@/components/backstage/admin-panel";
 import type { PublicChannel, PublicUser } from "@/lib/types";
@@ -113,6 +114,7 @@ function Shell() {
           {view === "recordings" && <RecordingsView />}
           {view === "schedule" && <ScheduleView />}
           {view === "collabs" && <CollabsView />}
+          {view === "settings" && <SettingsView />}
         </main>
       </div>
       <MobileNav />

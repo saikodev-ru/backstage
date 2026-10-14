@@ -296,7 +296,7 @@ export function VideoPlayer({
       aria-label="Видеоплеер трансляции"
       className={cn(
         "group/player relative aspect-video w-full overflow-hidden bg-black outline-none",
-        fullscreen ? "aspect-auto h-full rounded-none" : "rounded-2xl"
+        fullscreen ? "aspect-auto h-full rounded-none" : "rounded-none"
       )}
     >
       {/* Постер для гостей / без источника */}

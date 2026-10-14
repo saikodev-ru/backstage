@@ -47,19 +47,20 @@
 }
 
 /*
- * BACKSTAGE «ГРАФИТ» v3
+ * BACKSTAGE «ГРАФИТ» v4
  * Шершавый тёмный графит без цветовых акцентов: монохром, зерно, минимум
- * оконтовки. Цвет допускается только функционально: красный LIVE-индикатор
+ * оконтовки. Панели (сайдбар, чат) — бесцветные/прозрачные, общий фон чуть
+ * темнее. Цвет допускается только функционально: красный LIVE-индикатор
  * и бейджи ролей чата (как в Twitch). Приложение тёмное по умолчанию.
  */
 :root {
   --radius: 0.75rem;
   color-scheme: dark;
 
-  /* шершавый тёмный графит-канвас */
-  --background: #101013;
+  /* шершавый тёмный графит-канвас (v4: чуть темнее — панели прозрачные) */
+  --background: #0b0b0d;
   --foreground: #f4f4f6;
-  --card: #16161a;
+  --card: #141417;
   --card-foreground: #f4f4f6;
   --popover: #1a1a1f;
   --popover-foreground: #f4f4f6;
@@ -80,7 +81,7 @@
 
   /* единственный разрешённый акцент — красный LIVE */
   --live: #eb0400;
-  --graphite: #121215;
+  --graphite: #0e0e10;
 
   --chart-1: #d6d6de;
   --chart-2: #9a9aa4;
@@ -88,7 +89,7 @@
   --chart-4: #4a4a52;
   --chart-5: #33333a;
 
-  --sidebar: #121215;
+  --sidebar: #0e0e10;
   --sidebar-foreground: #f4f4f6;
   --sidebar-primary: #ececf1;
   --sidebar-primary-foreground: #101014;
@@ -99,9 +100,9 @@
 }
 
 .dark {
-  --background: #101013;
+  --background: #0b0b0d;
   --foreground: #f4f4f6;
-  --card: #16161a;
+  --card: #141417;
   --card-foreground: #f4f4f6;
   --popover: #1a1a1f;
   --popover-foreground: #f4f4f6;
@@ -118,8 +119,8 @@
   --input: rgba(255, 255, 255, 0.08);
   --ring: #c9c9d2;
   --live: #eb0400;
-  --graphite: #121215;
-  --sidebar: #121215;
+  --graphite: #0e0e10;
+  --sidebar: #0e0e10;
   --sidebar-foreground: #f4f4f6;
   --sidebar-primary: #ececf1;
   --sidebar-primary-foreground: #101014;
@@ -133,14 +134,26 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /*
+   * ФИКС «прыжка страницы» при открытии меню/диалогов (Radix → react-remove-scroll
+   * прячет скроллбар через overflow:hidden на body и добавляет padding-right
+   * компенсации). Двойная защита:
+   *   1) html { overflow-y: scroll } — полоса прокрутки есть ВСЕГДА,
+   *      поэтому body overflow:hidden больше не распространяется на вьюпорт
+   *      (CSS Overflow: распространение работает только при visible у корня);
+   *   2) body { padding-right: 0 !important } — гасит компенсацию remove-scroll,
+   *      которая при постоянно видимой полосе сама вызывает сдвиг контента.
+   * Итог: скроллбар не пропадает, ширина страницы не меняется.
+   */
   html {
-    scrollbar-gutter: stable;
-  }
-  ::selection {
-    background: rgba(244, 244, 246, 0.22);
+    overflow-y: scroll;
   }
   body {
     @apply bg-background text-foreground;
+    padding-right: 0 !important;
+  }
+  ::selection {
+    background: rgba(244, 244, 246, 0.22);
   }
 
   /* шершавость: киношное зерно поверх интерфейса (без цветных подсветок) */
@@ -177,9 +190,10 @@
   background: transparent;
 }
 
-/* ── Поверхности: матовый графит (минимум оконтовки) ─────────────────── */
+/* ── Поверхности: матовый графит (минимум оконтовки) ───────────────────
+   Панели интерфейса (сайдбар, чат) — прозрачные, фона не имеют. */
 .glass {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
