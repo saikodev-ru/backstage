@@ -20,10 +20,10 @@ export function RecordingsView() {
       <header className="fade-up flex flex-wrap items-center gap-3">
         <Library className="size-6 text-primary" />
         <div>
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Записи эфиров</h1>
+          <h1 className="headline text-xl sm:text-2xl">Записи эфиров</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Полные записи для подписчиков
-            {recordings ? ` · ${totalMinutes > 0 ? Math.round(totalMinutes / 60) : 0} ч архива` : ""}
+            Полный архив для подписчиков
+            {recordings ? ` · ${totalMinutes > 0 ? Math.round(totalMinutes / 60) : 0} ч эфиров` : ""}
           </p>
         </div>
       </header>

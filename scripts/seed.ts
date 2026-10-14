@@ -1,4 +1,5 @@
-// Сид «Бэкстейдж»: каналы, расписание, клипы, записи, коллаборации.
+// Сид «Бэкстейдж»: ОДИН канал dypaGPT (VTuber) + витрина-контент.
+// Фундамент мультиканала сохранён: модель Channel поддерживает сколько угодно авторов.
 // Запуск: bun scripts/seed.ts
 
 import { PrismaClient } from "@prisma/client";
@@ -15,136 +16,109 @@ function at(dayOffset: number, hour: number, minute = 0): Date {
 }
 
 async function main() {
-  console.log("🗄  Seeding Backstage…");
+  console.log("🗄  Seeding BACKSTAGE · dypaGPT…");
 
-  // ── Каналы ──────────────────────────────────────────────────────────────
-  const channels = [
-    {
-      slug: "saiko",
-      name: "SaikoDev",
-      handle: "saikodev",
-      tagline: "Код, музыка и ночные эфиры",
-      description:
-        "Приватный канал Saiko: ночные код-сессии, разборы архитектуры и живое общение с подписчиками. Доступ к эфирам — только для платных подписчиков приватного Telegram-канала.",
-      avatarUrl: "/img/avatars/saiko.png",
-      bannerUrl: "/img/banners/main.png",
-      accentColor: "#a970ff",
-      telegramChatId: process.env.TELEGRAM_CHAT_ID ?? "-1001234567890",
-      telegramLink: process.env.TELEGRAM_CHANNEL_LINK ?? "https://t.me/+example_private",
-      isLive: true,
-      liveTitle: "Ночная смена: собираем Бэкстейдж с нуля",
-      liveCategory: "Разработка",
-      liveTags: JSON.stringify(["код", "next.js", "typescript", "ночной эфир"]),
-      liveStartedAt: new Date(Date.now() - 47 * 60 * 1000),
-      livePreviewUrl: "/img/previews/saiko-live.png",
-      hlsUrl: MUX_TEST_STREAM,
-      followers: 12480,
-      viewers: 0,
-      sortOrder: 0,
-    },
-    {
-      slug: "lina",
-      name: "Lina Loops",
-      handle: "linaloops",
-      tagline: "Лайв-кодинг и модульные синтезаторы",
-      description:
-        "Еженедельные эфиры: генеративная музыка, Eurorack, суперколлайдер и лайв-кодинг на Sonic Pi.",
-      avatarUrl: "/img/avatars/lina.png",
-      bannerUrl: "/img/banners/lina.png",
-      accentColor: "#5ad1a4",
-      isLive: false,
-      followers: 5321,
-      sortOrder: 1,
-    },
-    {
-      slug: "lex",
-      name: "Lex Frames",
-      handle: "lexframes",
-      tagline: "Кинематографичные скетчи и моушн",
-      description: "Рисуем кадры в реальном времени: композиция, свет, цвет и сторителлинг.",
-      avatarUrl: "/img/avatars/lex.png",
-      bannerUrl: "/img/banners/lex.png",
-      accentColor: "#ffb86b",
-      isLive: false,
-      followers: 2870,
-      sortOrder: 2,
-    },
-  ];
+  // ── Каналы: один dypaGPT, старые демо-каналы убираем ────────────────────
+  await db.channel.deleteMany({
+    where: { slug: { in: ["saiko", "lina", "lex"] } },
+  });
 
-  for (const c of channels) {
-    await db.channel.upsert({ where: { slug: c.slug }, create: c, update: c });
-  }
+  const channel = {
+    slug: "dypagpt",
+    name: "dypaGPT",
+    handle: "dypagpt",
+    tagline: "ВТубер · нейро-девочка · игры, караоке и уютный вайб",
+    description:
+      "Приватный канал dypaGPT: хоррор-марафоны, караоке-ночи, рисование с чатом и Q&A. Аниме-аватар, живые эмоции и максимально тёплое комьюнити. Доступ к эфирам — только для платных подписчиков приватного Telegram-канала.",
+    avatarUrl: "/img/dypagpt/avatar.png",
+    bannerUrl: "/img/dypagpt/banner.png",
+    accentColor: "#a970ff",
+    telegramChatId: process.env.TELEGRAM_CHAT_ID ?? "",
+    telegramLink: process.env.TELEGRAM_CHANNEL_LINK ?? "https://t.me/dypaGPT",
+    isLive: true,
+    liveTitle: "ХОРРОР-МАРАФОН #17: до последнего скримера 😱",
+    liveCategory: "VTuber · Хорроры",
+    liveTags: JSON.stringify(["vtuber", "хоррор", "нейро-девочка", "караоке после"]),
+    liveStartedAt: new Date(Date.now() - 63 * 60 * 1000),
+    livePreviewUrl: "/img/dypagpt/live.png",
+    hlsUrl: MUX_TEST_STREAM,
+    followers: 24813,
+    viewers: 0,
+    sortOrder: 0,
+  };
 
-  // ── Расписание (ближайшие 7 дней) ───────────────────────────────────────
+  await db.channel.upsert({ where: { slug: channel.slug }, create: channel, update: channel });
+
+  // ── Расписание (неделя VTuber-эфиров) ──────────────────────────────────
   await db.scheduleEntry.deleteMany({});
   const schedule = [
-    { channelSlug: "saiko", title: "Ночная смена: финальный спринт Бэкстейджа", category: "Разработка", startsAt: at(1, 19), durationMin: 180, note: "Разбор чата, Q&A с подписчиками" },
-    { channelSlug: "lina", title: "Генеративный джем: Sonic Pi × Eurorack", category: "Музыка", startsAt: at(2, 20), durationMin: 120, note: null },
-    { channelSlug: "lex", title: "Скетч-марафон: 10 кадров за 2 часа", category: "Творчество", startsAt: at(3, 15), durationMin: 120, note: "Голосование за лучший кадр" },
-    { channelSlug: "saiko", title: "Код-ревью подписчиков", category: "Разработка", startsAt: at(4, 19), durationMin: 120, note: "Присылайте проекты в приватный чат" },
-    { channelSlug: "lina", title: "Альфа-тест аудио-движка Бэкстейджа", category: "Музыка", startsAt: at(5, 20), durationMin: 90, note: null },
-    { channelSlug: "saiko", title: "Субботний стрим: давно обещанный Q&A", category: "Общение", startsAt: at(6, 16), durationMin: 150, note: null },
+    { channelSlug: "dypagpt", title: "ХОРРОР-МАРАФОН #18: вторая часть", category: "Хорроры", startsAt: at(1, 19), durationMin: 180, note: "Продолжение игры со вчерашнего сейва" },
+    { channelSlug: "dypagpt", title: "КАРАОKE-НОЧЬ: поём ваши заявки", category: "Музыка", startsAt: at(2, 20), durationMin: 120, note: "Заявки в чате, сабы — приоритет" },
+    { channelSlug: "dypagpt", title: "РИСУЕМ ЭМОЦИИ: аватарки для чата", category: "Творчество", startsAt: at(3, 16), durationMin: 120, note: "Разыгрываем 3 аватарки среди подписчиков" },
+    { channelSlug: "dypagpt", title: "ИНДИ-ПОДПОЛКА: 3 игры за вечер", category: "Инди", startsAt: at(4, 19), durationMin: 150, note: null },
+    { channelSlug: "dypagpt", title: "Q&A С ПОДПИСЧИКАМИ + кружки чая", category: "Общение", startsAt: at(5, 20), durationMin: 90, note: "Собирайте вопросы в приватном чате" },
+    { channelSlug: "dypagpt", title: "СУББОТНИЙ МАРАФОН: всё сразу", category: "Микс", startsAt: at(6, 14), durationMin: 300, note: "Хоррор → караоке → рисование" },
   ];
   for (const s of schedule) {
     await db.scheduleEntry.create({ data: s });
   }
 
-  // ── Клипы (витрина-заглушки) ────────────────────────────────────────────
+  // ── Клипы (VTuber-моменты) ──────────────────────────────────────────────
   await db.clip.deleteMany({});
   const clips = [
-    { channelSlug: "saiko", title: "«У нас же тестовая ссылка!» — первый эфир Бэкстейджа", thumbnailUrl: "/img/clips/clip-1.png", durationSec: 42, views: 1834, createdAt: new Date(Date.now() - 2 * 864e5) },
-    { channelSlug: "saiko", title: "Момент, когда Prisma наконец смигрировал", thumbnailUrl: "/img/clips/clip-2.png", durationSec: 28, views: 952, createdAt: new Date(Date.now() - 3 * 864e5) },
-    { channelSlug: "lina", title: "Лайв-луп, который сломал интернет (почти)", thumbnailUrl: "/img/clips/clip-3.png", durationSec: 65, views: 4210, createdAt: new Date(Date.now() - 4 * 864e5) },
-    { channelSlug: "saiko", title: "Socket.io против Caddy: битва титанов", thumbnailUrl: "/img/clips/clip-4.png", durationSec: 51, views: 1187, createdAt: new Date(Date.now() - 5 * 864e5) },
-    { channelSlug: "lex", title: "Кадр «Лавандовая ночь» — от пустого холста до финала", thumbnailUrl: "/img/clips/clip-5.png", durationSec: 87, views: 763, createdAt: new Date(Date.now() - 6 * 864e5) },
-    { channelSlug: "saiko", title: "Топ-5 вопросов о приватных трансляциях", thumbnailUrl: "/img/clips/clip-6.png", durationSec: 74, views: 2311, createdAt: new Date(Date.now() - 7 * 864e5) },
+    { channelSlug: "dypagpt", title: "КАРАОКЕ-КРЕЩЕНДО: чат в слезах", thumbnailUrl: "/img/dypagpt/clip-1.png", durationSec: 42, views: 18340, createdAt: new Date(Date.now() - 1 * 864e5) },
+    { channelSlug: "dypagpt", title: "СКРИМ ГОДА: она не ожидала", thumbnailUrl: "/img/dypagpt/clip-2.png", durationSec: 28, views: 9252, createdAt: new Date(Date.now() - 2 * 864e5) },
+    { channelSlug: "dypagpt", title: "КЛАТЧ НА 1 ХП: чат сошёл с ума", thumbnailUrl: "/img/dypagpt/clip-3.png", durationSec: 65, views: 43210, createdAt: new Date(Date.now() - 3 * 864e5) },
+    { channelSlug: "dypagpt", title: "КОГДА ИГРА СЛОМАЛАСЬ: ржака 5 минут", thumbnailUrl: "/img/dypagpt/clip-4.png", durationSec: 51, views: 12187, createdAt: new Date(Date.now() - 4 * 864e5) },
+    { channelSlug: "dypagpt", title: "РИСУЮ ВАШУ АВАТАРКУ В ПРЯМОМ ЭФИРЕ", thumbnailUrl: "/img/dypagpt/clip-5.png", durationSec: 87, views: 7763, createdAt: new Date(Date.now() - 5 * 864e5) },
+    { channelSlug: "dypagpt", title: "ДОНАТ-СЮРПРИЗ: реакция 10/10", thumbnailUrl: "/img/dypagpt/clip-6.png", durationSec: 74, views: 23311, createdAt: new Date(Date.now() - 7 * 864e5) },
   ];
   for (const c of clips) {
     await db.clip.create({ data: c });
   }
 
-  // ── Записи эфиров (витрина-заглушки) ────────────────────────────────────
+  // ── Записи эфиров ──────────────────────────────────────────────────────
   await db.recording.deleteMany({});
   const recordings = [
-    { channelSlug: "saiko", title: "Эфир #12: Архитектура стриминговой платформы", thumbnailUrl: "/img/recordings/rec-1.png", durationSec: 9240, views: 3120, createdAt: new Date(Date.now() - 6 * 864e5) },
-    { channelSlug: "saiko", title: "Эфир #11: Telegram Login Widget от А до Я", thumbnailUrl: "/img/recordings/rec-2.png", durationSec: 7680, views: 2480, createdAt: new Date(Date.now() - 13 * 864e5) },
-    { channelSlug: "lina", title: "Сессия #8: Модульный джем в прямом эфире", thumbnailUrl: "/img/recordings/rec-3.png", durationSec: 6840, views: 1890, createdAt: new Date(Date.now() - 9 * 864e5) },
-    { channelSlug: "lex", title: "Скетч-вечер: свет и тень", thumbnailUrl: "/img/recordings/rec-4.png", durationSec: 5400, views: 1210, createdAt: new Date(Date.now() - 11 * 864e5) },
+    { channelSlug: "dypagpt", title: "ЭФИР #17: ХОРРОР-МАРАФОН (первая половина)", thumbnailUrl: "/img/dypagpt/rec-1.png", durationSec: 9240, views: 3150, createdAt: new Date(Date.now() - 2 * 864e5) },
+    { channelSlug: "dypagpt", title: "КАРАОКЕ-НОЧЬ #9: 40 песен подряд", thumbnailUrl: "/img/dypagpt/rec-2.png", durationSec: 7680, views: 2480, createdAt: new Date(Date.now() - 6 * 864e5) },
+    { channelSlug: "dypagpt", title: "Q&A #4: ОТВЕТЫ ПОДПИСЧИКАМ", thumbnailUrl: "/img/dypagpt/rec-3.png", durationSec: 6840, views: 1890, createdAt: new Date(Date.now() - 9 * 864e5) },
+    { channelSlug: "dypagpt", title: "ПРАЗДНИЧНЫЙ ЭФИР: 25 000 ПОДПИСЧИКОВ", thumbnailUrl: "/img/dypagpt/rec-4.png", durationSec: 5400, views: 1210, createdAt: new Date(Date.now() - 12 * 864e5) },
   ];
   for (const r of recordings) {
     await db.recording.create({ data: r });
   }
 
-  // ── Коллаборации ────────────────────────────────────────────────────────
+  // ── Коллаборации ──────────────────────────────────────────────────────
   await db.collab.deleteMany({});
   const collabs = [
     {
-      title: "Бэкстейдж: строим вместе",
-      description: "Совместный эфир Saiko и Lina: полный цикл — от верстки витрины до подключения медиа-сервера и проверки подписок.",
+      title: "ДУЭТ-КАРАОКЕ: dypaGPT × Милка",
+      description: "Совместная караоке-ночь: поём попурри, чат выбирает порядок песен, между блоками — мини-игры.",
       members: JSON.stringify([
-        { slug: "saiko", name: "SaikoDev", avatarUrl: "/img/avatars/saiko.png", role: "Ведущий" },
-        { slug: "lina", name: "Lina Loops", avatarUrl: "/img/avatars/lina.png", role: "Со-ведущая" },
+        { slug: "dypagpt", name: "dypaGPT", avatarUrl: "/img/dypagpt/avatar.png", role: "Ведущая" },
+        { slug: "milka", name: "Милка", avatarUrl: "/img/dypagpt/guest-1.png", role: "Со-ведущая" },
       ]),
       status: "confirmed",
-      plannedAt: at(1, 19),
+      plannedAt: at(2, 20),
     },
     {
-      title: "Лайв-джем: код × музыка",
-      description: "Lex рисует визуал в реальном времени под генеративные лупы Lina. Зрители голосуют за развитие композиции.",
+      title: "НЕЙРО-БАТТЛ: dypaGPT vs Кайто",
+      description: "Соревновательный эфир: инди-игры на скорость, проигравший поёт песню по заказу победителя.",
       members: JSON.stringify([
-        { slug: "lina", name: "Lina Loops", avatarUrl: "/img/avatars/lina.png", role: "Звук" },
-        { slug: "lex", name: "Lex Frames", avatarUrl: "/img/avatars/lex.png", role: "Визуал" },
+        { slug: "dypagpt", name: "dypaGPT", avatarUrl: "/img/dypagpt/avatar.png", role: "Капитан 1" },
+        { slug: "kaito", name: "Кайто", avatarUrl: "/img/dypagpt/guest-2.png", role: "Капитан 2" },
       ]),
       status: "planning",
-      plannedAt: at(3, 20),
+      plannedAt: at(4, 19),
     },
     {
-      title: "Марафон закрытия сезона",
-      description: "Все авторы Бэкстейджа в одном эфире: итоги, розыгрыш среди подписчиков и анонс следующего сезона.",
+      title: "ИДЕЯ: ВСЕ ВТУБЕРЫ В ОДНОМ ЭФИРЕ",
+      description: "Большой кроссовер: каждому гостю — свой блок, общие мини-игры и финальное караоке-попурри.",
       members: JSON.stringify([
-        { slug: "saiko", name: "SaikoDev", avatarUrl: "/img/avatars/saiko.png", role: "Организатор" },
-        { slug: "lina", name: "Lina Loops", avatarUrl: "/img/avatars/lina.png", role: "Участница" },
-        { slug: "lex", name: "Lex Frames", avatarUrl: "/img/avatars/lex.png", role: "Участник" },
+        { slug: "dypagpt", name: "dypaGPT", avatarUrl: "/img/dypagpt/avatar.png", role: "Организатор" },
+        { slug: "milka", name: "Милка", avatarUrl: "/img/dypagpt/guest-1.png", role: "Гость" },
+        { slug: "kaito", name: "Кайто", avatarUrl: "/img/dypagpt/guest-2.png", role: "Гость" },
       ]),
       status: "idea",
       plannedAt: null,

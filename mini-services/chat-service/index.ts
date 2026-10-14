@@ -1,23 +1,37 @@
 /**
- * Backstage (Бэкстейдж) — chat microservice.
+ * Backstage (Бэкстейдж) — chat microservice v2.
  *
  * Standalone socket.io server on fixed port 3003 (Caddy gateway forwards
  * requests with ?XTransformPort=3003 to this port).
  *
- * Features:
+ * v1 features (kept intact):
  *  - per-channel rooms: "ch:<slug>"
  *  - auth via HMAC token (issued by the main Next.js app, only verified here)
- *  - subscriber-only message sending + rate limiting (1500ms / uid)
- *  - in-memory history (last 100 messages per channel)
- *  - presence / viewer counts, reported to the main app every 10s
- *  - fire-and-forget persistence callback to the main app (/api/chat/ingest)
- *  - internal plain-HTTP endpoints: GET /health, POST /announce
+ *  - subscriber-only sending + rate limiting, in-memory history (100/channel)
+ *  - presence / viewer counts reported to the main app every 10s
+ *  - fire-and-forget persistence to the main app (/api/chat/ingest)
+ *  - plain-HTTP endpoints: GET /health, POST /announce
+ *
+ * v2 additions:
+ *  - emotes from 7TV / BTTV / FFZ (sqlite cache, 6h refresh) + GET /api/emotes
+ *  - chat commands: public (!uptime, !title, !команды, !эмоции, custom !cmds)
+ *    and moderator /-commands (ban/timeout/clear/slow/subsonly/so/delete/
+ *    mod/cmd/demo); command replies are system messages from "dypaGPT"
+ *  - moderation state in its own sqlite DB (data/chat.db, bun:sqlite):
+ *    bans, mods, custom commands, per-channel slow/subsonly, settings
+ *  - demo chat (DEMO_CHAT=1 or /demo on): fake VTuber viewers keep rooms alive
+ *  - REST for OBS / admin: /api/messages, /api/send (Bearer token),
+ *    /api/mods, /api/bans, /api/chstate; CORS * everywhere
+ *  - GET /overlay — OBS browser-source overlay (watch-only socket, no token)
  *
  * Everything lives in this single file on purpose.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
-import { Server } from 'socket.io'
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { Server, type Socket } from 'socket.io'
+import { Database } from 'bun:sqlite'
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -28,13 +42,26 @@ const CHAT_SECRET = process.env.CHAT_SECRET || 'backstage-dev-chat-secret-2024'
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET || 'backstage-internal-2024'
 const MAIN_APP_BASE = 'http://127.0.0.1:3000'
 const HISTORY_CAP = 100 // last N messages kept per channel
-const RATE_LIMIT_MS = 1500 // min delay between messages per uid
+const RATE_LIMIT_MS = 1500 // min delay between messages per uid (>= slow mode)
 const VIEWERS_INTERVAL_MS = 10_000
 const MAX_HTTP_BODY = 100 * 1024
+
+// v2 config
+const DEMO_ENV = process.env.DEMO_CHAT === '1' // demo chat at startup; /demo persists
+const EMOTES_REFRESH_MS = 6 * 60 * 60 * 1000
+const EMOTE_FETCH_TIMEOUT_MS = 8000
+const CHANNELS_CACHE_MS = 30_000 // /api/channels cache for !uptime / !title
+const BANS_CLEANUP_MS = 60_000
+
+const SEVEN_TV_URL = 'https://7tv.io/v3/emote-sets/global'
+const BTTV_URL = 'https://api.betterttv.net/3/cached/emotes/global'
+const FFZ_URL = 'https://api.frankerfacez.com/v1/set/global'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+type Role = 'OWNER' | 'MOD' | 'VIEWER'
 
 /** Decrypted & verified auth token payload (issued by the main app). */
 interface ChatUser {
@@ -45,6 +72,7 @@ interface ChatUser {
   slug: string
   sub: boolean
   adm: boolean
+  role: Role
   exp: number
 }
 
@@ -58,9 +86,119 @@ interface ChatMsg {
   text: string
   ts: number
   system: boolean
+  /** sender badge for the UI (OWNER/MOD only; VIEWER -> field omitted) */
+  role?: 'OWNER' | 'MOD'
+  /** set by /delete — deleted messages are hidden from clients */
+  deleted?: true
 }
 
 type RequestListener = (req: IncomingMessage, res: ServerResponse) => void
+
+interface BanRow {
+  uid: string
+  name: string
+  reason: string
+  until: number // 0 -> permanent
+}
+
+interface ChState {
+  slowSec: number
+  subsonly: number // 1 -> only subs (and MOD/OWNER) may write; default 1 (v1 behaviour)
+}
+
+interface EmoteRow {
+  provider: string
+  name: string
+  url: string
+}
+
+interface ChannelInfo {
+  slug: string
+  isLive: boolean
+  liveTitle: string | null
+  liveStartedAt: string | null
+}
+
+// ---------------------------------------------------------------------------
+// SQLite state store (bun:sqlite) — separate from the main app's Prisma DB
+// ---------------------------------------------------------------------------
+
+const DATA_DIR = join(import.meta.dir, 'data')
+mkdirSync(DATA_DIR, { recursive: true })
+
+const db = new Database(join(DATA_DIR, 'chat.db'))
+db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;')
+db.exec(
+  'CREATE TABLE IF NOT EXISTS emotes (' +
+    'provider TEXT NOT NULL, name TEXT NOT NULL, url TEXT NOT NULL,' +
+    ' PRIMARY KEY (provider, name))',
+)
+db.exec(
+  'CREATE TABLE IF NOT EXISTS bans (' +
+    'uid TEXT PRIMARY KEY, name TEXT NOT NULL, reason TEXT NOT NULL DEFAULT \'\',' +
+    ' until INTEGER NOT NULL DEFAULT 0)',
+)
+db.exec(
+  'CREATE TABLE IF NOT EXISTS mods (' +
+    'uid TEXT PRIMARY KEY, name TEXT NOT NULL, addedBy TEXT NOT NULL DEFAULT \'\')',
+)
+db.exec(
+  'CREATE TABLE IF NOT EXISTS commands (' +
+    'name TEXT PRIMARY KEY, response TEXT NOT NULL, addedBy TEXT NOT NULL DEFAULT \'\')',
+)
+db.exec(
+  'CREATE TABLE IF NOT EXISTS chstate (' +
+    'channelSlug TEXT PRIMARY KEY, slowSec INTEGER NOT NULL DEFAULT 0,' +
+    ' subsonly INTEGER NOT NULL DEFAULT 1)',
+)
+db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+
+const qEmoteClear = db.prepare('DELETE FROM emotes WHERE provider = ?')
+const qEmoteInsert = db.prepare('INSERT OR REPLACE INTO emotes (provider, name, url) VALUES (?, ?, ?)')
+const qEmoteAll = db.prepare<EmoteRow>('SELECT provider, name, url FROM emotes')
+const qEmoteCount = db.prepare<{ c: number }>('SELECT COUNT(*) AS c FROM emotes')
+const qEmoteCountProvider = db.prepare<{ c: number }>('SELECT COUNT(*) AS c FROM emotes WHERE provider = ?')
+
+const qBanGet = db.prepare<BanRow>('SELECT uid, name, reason, until FROM bans WHERE uid = ?')
+const qBanPut = db.prepare('INSERT OR REPLACE INTO bans (uid, name, reason, until) VALUES (?, ?, ?, ?)')
+const qBanDel = db.prepare('DELETE FROM bans WHERE uid = ?')
+const qBanName = db.prepare<BanRow>('SELECT uid, name, reason, until FROM bans WHERE lower(name) = ?')
+const qBanAll = db.prepare<BanRow>('SELECT uid, name, reason, until FROM bans WHERE until = 0 OR until > ? ORDER BY until')
+const qBanCount = db.prepare<{ c: number }>('SELECT COUNT(*) AS c FROM bans WHERE until = 0 OR until > ?')
+const qBanCleanup = db.prepare('DELETE FROM bans WHERE until > 0 AND until <= ?')
+
+const qModGet = db.prepare<{ uid: string; name: string }>('SELECT uid, name FROM mods WHERE uid = ?')
+const qModName = db.prepare<{ uid: string; name: string }>('SELECT uid, name FROM mods WHERE lower(name) = ?')
+const qModPut = db.prepare('INSERT OR REPLACE INTO mods (uid, name, addedBy) VALUES (?, ?, ?)')
+const qModDel = db.prepare('DELETE FROM mods WHERE uid = ?')
+const qModAll = db.prepare<{ uid: string; name: string }>('SELECT uid, name FROM mods ORDER BY name')
+
+const qCmdGet = db.prepare<{ name: string; response: string }>('SELECT name, response FROM commands WHERE name = ?')
+const qCmdPut = db.prepare('INSERT OR REPLACE INTO commands (name, response, addedBy) VALUES (?, ?, ?)')
+const qCmdDel = db.prepare('DELETE FROM commands WHERE name = ?')
+const qCmdAll = db.prepare<{ name: string; response: string }>('SELECT name, response FROM commands ORDER BY name')
+
+const qStateGet = db.prepare<{ slowSec: number; subsonly: number }>(
+  'SELECT slowSec, subsonly FROM chstate WHERE channelSlug = ?',
+)
+const qStatePut = db.prepare(
+  'INSERT OR REPLACE INTO chstate (channelSlug, slowSec, subsonly) VALUES (?, ?, ?)',
+)
+
+const qSettingGet = db.prepare<{ value: string }>('SELECT value FROM settings WHERE key = ?')
+const qSettingPut = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+
+function getSetting(key: string): string | null {
+  const row = qSettingGet.get(key)
+  return row ? row.value : null
+}
+
+function setSetting(key: string, value: string): void {
+  qSettingPut.run(key, value)
+}
+
+/** Demo chat switch: env var wins at startup, /demo persists into settings. */
+let demoEnabled = DEMO_ENV || getSetting('demo') === '1'
 
 // ---------------------------------------------------------------------------
 // HTTP server + socket.io (path MUST stay "/" for the gateway)
@@ -82,23 +220,36 @@ const io = new Server(httpServer, {
 // Plain HTTP routing, coexisting with socket.io
 //
 // With path "/" engine.io's request check matches every URL that starts with
-// "/", so /health and /announce would otherwise be swallowed by engine.io
+// "/", so /health, /api/* etc. would otherwise be swallowed by engine.io
 // ("Transport unknown"). We therefore re-wrap the listener chain (the exact
 // same wrapping technique engine.io / socket.io use internally): our
 // dispatcher handles its own routes first and forwards everything else —
 // engine.io polling / websocket traffic, URLs containing EIO= — untouched.
 // ---------------------------------------------------------------------------
 
+const REST_PATHS = new Set(['/health', '/announce', '/overlay'])
+
 const socketIoChain = httpServer.listeners('request').slice(0) as RequestListener[]
 httpServer.removeAllListeners('request')
 httpServer.on('request', (req, res) => {
   const pathname = (req.url ?? '/').split('?')[0]
-  if (pathname === '/health' || pathname === '/announce') {
+  const isRest = REST_PATHS.has(pathname) || pathname.startsWith('/api/')
+  if (isRest) {
+    if (req.method === 'OPTIONS') {
+      // CORS preflight for browser clients (overlay, admin panel)
+      res.writeHead(204, {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type, authorization',
+        'access-control-max-age': '86400',
+      })
+      res.end()
+      return
+    }
     handleHttpRequest(req, res, pathname).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       if (!res.headersSent) {
-        res.writeHead(500, { 'content-type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: msg }))
+        sendJson(res, 500, { ok: false, error: msg })
       } else {
         res.end()
       }
@@ -130,9 +281,20 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 function sendJson(res: ServerResponse, status: number, body: Record<string, unknown>): void {
-  res.writeHead(status, { 'content-type': 'application/json' })
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'access-control-allow-origin': '*',
+  })
   res.end(JSON.stringify(body))
 }
+
+function requestParams(req: IncomingMessage): URLSearchParams {
+  return new URL(req.url ?? '/', 'http://internal.local').searchParams
+}
+
+// ---------------------------------------------------------------------------
+// REST routing
+// ---------------------------------------------------------------------------
 
 async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<void> {
   // --- GET /health ---
@@ -141,7 +303,163 @@ async function handleHttpRequest(req: IncomingMessage, res: ServerResponse, path
       sendJson(res, 405, { ok: false, error: 'method not allowed' })
       return
     }
-    sendJson(res, 200, { ok: true, service: 'backstage-chat', clients: io.engine.clientsCount })
+    const now = Date.now()
+    sendJson(res, 200, {
+      ok: true,
+      service: 'backstage-chat',
+      clients: io.engine.clientsCount,
+      emotes: (qEmoteCount.get() ?? { c: 0 }).c,
+      bans: (qBanCount.get(now) ?? { c: 0 }).c,
+      demo: demoEnabled === true,
+    })
+    return
+  }
+
+  // --- GET /api/emotes ---
+  if (pathname === '/api/emotes') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const emotes = listEmotes()
+    sendJson(res, 200, { ok: true, emotes, count: emotes.length })
+    return
+  }
+
+  // --- GET /api/mods (channel param reserved; mods are global) ---
+  if (pathname === '/api/mods') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    sendJson(res, 200, { ok: true, mods: qModAll.all() })
+    return
+  }
+
+  // --- GET /api/bans ---
+  if (pathname === '/api/bans') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    sendJson(res, 200, { ok: true, bans: qBanAll.all(Date.now()) })
+    return
+  }
+
+  // --- GET /api/chstate?channel=slug ---
+  if (pathname === '/api/chstate') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const channel = requestParams(req).get('channel') ?? ''
+    const st = getChstate(channel)
+    sendJson(res, 200, {
+      ok: true,
+      slow: st.slowSec,
+      subsonly: st.subsonly === 1,
+      demo: demoEnabled === true,
+    })
+    return
+  }
+
+  // --- GET /api/messages?channel=slug&limit=100&after=ms ---
+  if (pathname === '/api/messages') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const params = requestParams(req)
+    const channel = params.get('channel')
+    if (typeof channel !== 'string' || channel.length === 0) {
+      sendJson(res, 400, { ok: false, error: 'bad_request', message: 'channel is required' })
+      return
+    }
+    const afterRaw = Number(params.get('after') ?? '0')
+    const after = Number.isFinite(afterRaw) && afterRaw > 0 ? afterRaw : 0
+    const limitRaw = Number(params.get('limit') ?? '100')
+    const limit = Number.isFinite(limitRaw) ? Math.min(500, Math.max(1, Math.floor(limitRaw))) : 100
+    const messages = (history.get(channel) ?? [])
+      .filter((m) => !m.deleted && (after === 0 || m.ts > after))
+      .slice(-limit)
+    sendJson(res, 200, { ok: true, messages })
+    return
+  }
+
+  // --- POST /api/send (OBS / bots): Bearer chat-token + {channelSlug, text} ---
+  if (pathname === '/api/send') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const authHeader = req.headers.authorization
+    const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+    const user = verifyToken(bearer)
+    if (!user) {
+      sendJson(res, 401, { ok: false, error: 'unauthorized', message: 'Требуется валидный Bearer-токен чата' })
+      return
+    }
+    let raw: string
+    try {
+      raw = await readBody(req)
+    } catch {
+      sendJson(res, 413, { ok: false, error: 'payload too large' })
+      return
+    }
+    let parsed: { channelSlug?: unknown; text?: unknown }
+    try {
+      parsed = JSON.parse(raw.length > 0 ? raw : '{}')
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid json' })
+      return
+    }
+    const channelSlug = parsed.channelSlug
+    const text = typeof parsed.text === 'string' ? parsed.text.trim() : ''
+    if (typeof channelSlug !== 'string' || channelSlug.length === 0) {
+      sendJson(res, 400, { ok: false, error: 'bad_request', message: 'channelSlug и text обязательны' })
+      return
+    }
+    const result = await processChatText(channelSlug, user, text, null)
+    if (!result.ok) {
+      sendJson(res, result.status ?? 400, {
+        ok: false,
+        error: result.code,
+        code: result.code,
+        message: result.message,
+      })
+      return
+    }
+    if (result.msg) {
+      sendJson(res, 200, { ok: true, message: result.msg })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      command: true,
+      ...(result.senderOnly ? { response: result.senderOnly.text } : {}),
+    })
+    return
+  }
+
+  // --- GET /overlay (OBS browser source; read-only, no token) ---
+  if (pathname === '/overlay') {
+    if (req.method !== 'GET') {
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return
+    }
+    const params = requestParams(req)
+    const channel = (params.get('channel') ?? 'dypagpt').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64) || 'dypagpt'
+    const scaleRaw = Number(params.get('scale') ?? '1')
+    const scale = Math.min(4, Math.max(0.5, Number.isFinite(scaleRaw) && scaleRaw > 0 ? scaleRaw : 1))
+    const html = OVERLAY_HTML.replace('__CHANNEL_JSON__', JSON.stringify(channel)).replace(
+      '__SCALE_JSON__',
+      String(scale),
+    )
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'access-control-allow-origin': '*',
+    })
+    res.end(html)
     return
   }
 
@@ -219,6 +537,8 @@ function verifyToken(token: unknown): ChatUser | null {
     if (typeof payload.uid !== 'string' || payload.uid.length === 0) return null
     if (typeof payload.name !== 'string') return null
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null
+    const role: Role =
+      payload.role === 'OWNER' || payload.role === 'MOD' || payload.role === 'VIEWER' ? payload.role : 'VIEWER'
     return {
       uid: payload.uid,
       name: payload.name,
@@ -227,6 +547,7 @@ function verifyToken(token: unknown): ChatUser | null {
       slug: typeof payload.slug === 'string' ? payload.slug : '',
       sub: payload.sub === true,
       adm: payload.adm === true,
+      role,
       exp: payload.exp,
     }
   } catch {
@@ -258,6 +579,306 @@ function appendHistory(slug: string, message: ChatMsg): void {
   history.set(slug, list)
 }
 
+/** History visible to clients (deleted messages are hidden). */
+function visibleHistory(slug: string): ChatMsg[] {
+  return (history.get(slug) ?? []).filter((m) => !m.deleted)
+}
+
+// ---------------------------------------------------------------------------
+// Moderation state helpers (sqlite)
+// ---------------------------------------------------------------------------
+
+function getChstate(slug: string): ChState {
+  const row = qStateGet.get(slug)
+  if (!row) return { slowSec: 0, subsonly: 1 }
+  return { slowSec: Math.max(0, row.slowSec | 0), subsonly: row.subsonly ? 1 : 0 }
+}
+
+function setChstate(slug: string, patch: Partial<ChState>): ChState {
+  const cur = getChstate(slug)
+  const next: ChState = {
+    slowSec: patch.slowSec !== undefined ? Math.max(0, Math.floor(patch.slowSec)) : cur.slowSec,
+    subsonly: patch.subsonly !== undefined ? (patch.subsonly ? 1 : 0) : cur.subsonly,
+  }
+  qStatePut.run(slug, next.slowSec, next.subsonly)
+  return next
+}
+
+function getActiveBan(uid: string): BanRow | null {
+  const row = qBanGet.get(uid)
+  if (!row) return null
+  if (row.until === 0 || row.until > Date.now()) return row
+  qBanDel.run(uid) // auto-clean the expired timeout
+  return null
+}
+
+function banMessage(ban: BanRow): string {
+  const reason = ban.reason ? ` Причина: ${ban.reason}.` : ''
+  if (ban.until === 0) return `Вы забанены навсегда.${reason}`
+  const t = new Date(ban.until).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  return `Вы в тайм-ауте до ${t}.${reason}`
+}
+
+/** Effective role: token role/adm, or the local mods table. */
+function effectiveRole(user: ChatUser): Role {
+  if (user.adm || user.role === 'OWNER') return 'OWNER'
+  if (user.role === 'MOD') return 'MOD'
+  if (qModGet.get(user.uid)) return 'MOD'
+  return 'VIEWER'
+}
+
+/** Find a chatter by display name: latest channel history first, then bans/mods tables. */
+function findChatterByName(channel: string, name: string): { uid: string; name: string } | null {
+  const target = name.trim().toLowerCase()
+  if (!target) return null
+  const list = history.get(channel) ?? []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i]
+    if (m.uid && m.name.toLowerCase() === target) return { uid: m.uid, name: m.name }
+  }
+  const banned = qBanName.get(target)
+  if (banned) return { uid: banned.uid, name: banned.name }
+  const mod = qModName.get(target)
+  if (mod) return { uid: mod.uid, name: mod.name }
+  return null
+}
+
+function parseDuration(input: string): number | null {
+  const m = /^(\d+)(s|m|h)?$/i.exec(input.trim())
+  if (!m) return null
+  const n = parseInt(m[1], 10)
+  if (!Number.isFinite(n) || n <= 0) return null
+  const suffix = (m[2] ?? '').toLowerCase()
+  const mult = suffix === 'm' ? 60 : suffix === 'h' ? 3600 : 1
+  return Math.min(2_592_000, n * mult) // seconds, capped at 30 days
+}
+
+function formatDuration(sec: number): string {
+  if (sec >= 3600 && sec % 3600 === 0) return `${sec / 3600}ч`
+  if (sec >= 3600) return `${Math.floor(sec / 3600)}ч ${Math.floor((sec % 3600) / 60)}м`
+  if (sec >= 60) return `${Math.floor(sec / 60)}м`
+  return `${sec}с`
+}
+
+// ---------------------------------------------------------------------------
+// Emotes (7TV / BTTV / FFZ) — fetched, cached in sqlite, refreshed every 6h
+// ---------------------------------------------------------------------------
+
+async function fetchJson(url: string, timeoutMs: number): Promise<unknown> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'user-agent': 'backstage-chat/2.0 (+https://backstage.local)' },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return await res.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function pick7tvFile(files: Array<{ name?: unknown }>): string | null {
+  const names = files.map((f) => (typeof f.name === 'string' ? f.name : '')).filter((n) => n.length > 0)
+  if (names.length === 0) return null
+  const webp = names.filter((n) => n.endsWith('.webp'))
+  const pool = webp.length > 0 ? webp : names
+  for (const pref of ['2x.webp', '3x.webp', '4x.webp', '1x.webp']) {
+    if (pool.includes(pref)) return pref
+  }
+  return pool[0]
+}
+
+async function fetchEmotes(provider: string): Promise<EmoteRow[]> {
+  const rows: EmoteRow[] = []
+  if (provider === '7tv') {
+    const data = (await fetchJson(SEVEN_TV_URL, EMOTE_FETCH_TIMEOUT_MS)) as {
+      emotes?: Array<{ name?: unknown; data?: { host?: { url?: unknown; files?: Array<{ name?: unknown }> } } }>
+    }
+    for (const e of data.emotes ?? []) {
+      const name = typeof e.name === 'string' ? e.name : null
+      const hostUrl = typeof e.data?.host?.url === 'string' ? e.data.host.url : null
+      if (!name || !hostUrl) continue
+      const file = pick7tvFile(Array.isArray(e.data?.host?.files) ? (e.data!.host!.files as Array<{ name?: unknown }>) : [])
+      if (!file) continue
+      rows.push({ provider: '7tv', name, url: `https:${hostUrl.replace(/\/+$/, '')}/${file}` })
+    }
+  } else if (provider === 'bttv') {
+    const data = (await fetchJson(BTTV_URL, EMOTE_FETCH_TIMEOUT_MS)) as Array<{ id?: unknown; code?: unknown }>
+    for (const e of Array.isArray(data) ? data : []) {
+      if (typeof e.code === 'string' && e.code.length > 0 && typeof e.id === 'string' && e.id.length > 0) {
+        rows.push({ provider: 'bttv', name: e.code, url: `https://cdn.betterttv.net/emote/${e.id}/2x` })
+      }
+    }
+  } else if (provider === 'ffz') {
+    const data = (await fetchJson(FFZ_URL, EMOTE_FETCH_TIMEOUT_MS)) as {
+      sets?: Record<string, { emoticons?: Array<{ name?: unknown; urls?: Record<string, unknown> }> }>
+    }
+    for (const key of Object.keys(data.sets ?? {})) {
+      for (const e of data.sets[key].emoticons ?? []) {
+        const name = typeof e.name === 'string' ? e.name : null
+        const urls = e.urls ?? {}
+        const raw =
+          typeof urls['2'] === 'string'
+            ? urls['2']
+            : typeof urls['4'] === 'string'
+              ? urls['4']
+              : typeof urls['1'] === 'string'
+                ? urls['1']
+                : null
+        if (!name || !raw) continue
+        const url = raw.startsWith('//') ? `https:${raw}` : raw
+        rows.push({ provider: 'ffz', name, url })
+      }
+    }
+  }
+  return rows
+}
+
+function refreshEmotes(): void {
+  for (const provider of ['7tv', 'bttv', 'ffz'] as const) {
+    fetchEmotes(provider)
+      .then((rows) => {
+        db.transaction(() => {
+          qEmoteClear.run(provider)
+          for (const r of rows) qEmoteInsert.run(r.provider, r.name, r.url)
+        })()
+        console.log(`[emotes] ${provider}: ${rows.length} cached`)
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.log(`[emotes] ${provider} refresh failed: ${msg}`)
+      })
+  }
+}
+
+const EMOTE_PRIORITY: Record<string, number> = { '7tv': 0, bttv: 1, ffz: 2 }
+
+/** All emotes, deduped by name (7tv > bttv > ffz priority). */
+function listEmotes(): EmoteRow[] {
+  const byName = new Map<string, EmoteRow>()
+  for (const row of qEmoteAll.all()) {
+    const existing = byName.get(row.name)
+    const p = EMOTE_PRIORITY[row.provider] ?? 9
+    if (!existing || p < (EMOTE_PRIORITY[existing.provider] ?? 9)) byName.set(row.name, row)
+  }
+  return [...byName.values()].sort(
+    (a, b) =>
+      (EMOTE_PRIORITY[a.provider] ?? 9) - (EMOTE_PRIORITY[b.provider] ?? 9) || a.name.localeCompare(b.name),
+  )
+}
+
+function emotesText(): string {
+  const total = (qEmoteCount.get() ?? { c: 0 }).c
+  if (total === 0) return 'Эмодзи ещё не загрузились — попробуйте через минуту'
+  const c7 = (qEmoteCountProvider.get('7tv') ?? { c: 0 }).c
+  const cb = (qEmoteCountProvider.get('bttv') ?? { c: 0 }).c
+  const cf = (qEmoteCountProvider.get('ffz') ?? { c: 0 }).c
+  return `Подключено ${total} эмодзи: 7TV — ${c7}, BTTV — ${cb}, FFZ — ${cf}`
+}
+
+// ---------------------------------------------------------------------------
+// Main-app channel info (!uptime / !title), cached 30s
+// ---------------------------------------------------------------------------
+
+let channelsCache: { at: number; bySlug: Map<string, ChannelInfo> } | null = null
+
+/** ChannelInfo | null (not found / offline) | 'error' (main app unreachable). */
+async function fetchChannelInfo(slug: string): Promise<ChannelInfo | null | 'error'> {
+  if (!channelsCache || Date.now() - channelsCache.at > CHANNELS_CACHE_MS) {
+    try {
+      const data = (await fetchJson(`${MAIN_APP_BASE}/api/channels`, 5000)) as { channels?: unknown[] }
+      const bySlug = new Map<string, ChannelInfo>()
+      if (Array.isArray(data?.channels)) {
+        for (const c of data.channels) {
+          const ch = c as {
+            slug?: unknown
+            isLive?: unknown
+            liveTitle?: unknown
+            liveStartedAt?: unknown
+          }
+          if (typeof ch.slug !== 'string' || ch.slug.length === 0) continue
+          bySlug.set(ch.slug, {
+            slug: ch.slug,
+            isLive: ch.isLive === true,
+            liveTitle: typeof ch.liveTitle === 'string' ? ch.liveTitle : null,
+            liveStartedAt: typeof ch.liveStartedAt === 'string' ? ch.liveStartedAt : null,
+          })
+        }
+      }
+      channelsCache = { at: Date.now(), bySlug }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.log(`[channels] refresh failed: ${msg}`)
+      return 'error'
+    }
+  }
+  return channelsCache.bySlug.get(slug) ?? null
+}
+
+function formatUptime(startedAt: string): string {
+  const start = Date.parse(startedAt)
+  if (!Number.isFinite(start)) return 'стрим сейчас не в эфире'
+  const diff = Math.max(0, Date.now() - start)
+  const h = Math.floor(diff / 3_600_000)
+  const m = Math.floor((diff % 3_600_000) / 60_000)
+  return h > 0 ? `В ЭФИРЕ УЖЕ ${h}ч ${m}м` : `В ЭФИРЕ УЖЕ ${m}м`
+}
+
+async function uptimeText(channel: string): Promise<string> {
+  const info = await fetchChannelInfo(channel)
+  if (info === 'error') return 'Статус эфира временно недоступен — попробуйте позже'
+  if (!info || !info.isLive || !info.liveStartedAt) return 'стрим сейчас не в эфире'
+  return formatUptime(info.liveStartedAt)
+}
+
+async function titleText(channel: string): Promise<string> {
+  const info = await fetchChannelInfo(channel)
+  if (info === 'error') return 'Статус эфира временно недоступен — попробуйте позже'
+  if (!info || !info.isLive) return 'стрим сейчас не в эфире'
+  return info.liveTitle ? `Эфир: ${info.liveTitle}` : 'Название эфира не задано'
+}
+
+function commandsListText(): string {
+  const custom = qCmdAll.all().map((r) => '!' + r.name)
+  const base = ['!uptime', '!title', '!команды', '!эмоции']
+  const all = custom.length > 0 ? base.concat(custom) : base
+  return (
+    `Команды чата: ${all.join(' · ')}. ` +
+    'Модераторам: /ban, /unban, /timeout, /untimeout, /clear, /slow, /slowoff, /subsonly, /so, /delete, /mod, /unmod, /cmd, /demo'
+  )
+}
+
+// ---------------------------------------------------------------------------
+// System messages (command replies; NOT persisted to the main app)
+// ---------------------------------------------------------------------------
+
+const BOT_NAME = 'dypaGPT'
+const BOT_COLOR = '#a970ff'
+
+function buildSystemMsg(channelSlug: string, text: string): ChatMsg {
+  return {
+    id: randomUUID(),
+    channelSlug,
+    uid: null,
+    name: BOT_NAME,
+    color: BOT_COLOR,
+    avatar: null,
+    text,
+    ts: Date.now(),
+    system: true,
+  }
+}
+
+/** System message -> room + in-memory history (never persisted). */
+function emitSystem(channelSlug: string, text: string): ChatMsg {
+  const message = buildSystemMsg(channelSlug, text)
+  appendHistory(channelSlug, message)
+  io.in(roomKey(channelSlug)).emit('chat:message', { message })
+  return message
+}
+
 // ---------------------------------------------------------------------------
 // Fire-and-forget callbacks into the main app (never crash the service)
 // ---------------------------------------------------------------------------
@@ -282,8 +903,477 @@ function postJson(url: string, body: unknown, label: string): void {
 }
 
 function persistMessage(channelSlug: string, message: ChatMsg): void {
+  // demo chat and system/command messages live in memory only
+  if (message.system) return
+  if (message.uid && message.uid.startsWith('demo:')) return
   postJson(`${MAIN_APP_BASE}/api/chat/ingest`, { channelSlug, message }, 'persist')
 }
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+const PUBLIC_BUILTINS = new Set(['uptime', 'title', 'команды', 'commands', 'эмоции', 'emotes'])
+
+interface CmdCtx {
+  channel: string
+  user: ChatUser
+  role: Role
+  args: string[]
+  socket: Socket | null // present for socket.io senders, null for /api/send
+}
+
+type CmdResult =
+  | { kind: 'error'; code: string; message: string; status?: number }
+  | { kind: 'sender'; text: string }
+
+function cmdError(code: string, message: string, status = 400): CmdResult {
+  return { kind: 'error', code, message, status }
+}
+
+/** Substitute {name} placeholders with the caller's display name. */
+function substituteName(response: string, name: string): string {
+  return response.split('{name}').join(name)
+}
+
+function sanitizeCommandName(raw: string): string {
+  return raw.replace(/^[!\/]+/, '').trim().toLowerCase()
+}
+
+// --- moderator /-commands ---------------------------------------------------
+
+const OWNER_ONLY_COMMANDS = new Set(['mod', 'unmod', 'demo'])
+
+async function cmdBan(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  if (!target) return cmdError('bad_args', 'Использование: /ban <ник> [причина]')
+  const reason = ctx.args.slice(1).join(' ').trim()
+  const found = findChatterByName(ctx.channel, target)
+  if (!found) return cmdError('user_not_found', `${target} не найден в чате`, 404)
+  qBanPut.run(found.uid, found.name, reason, 0)
+  emitSystem(ctx.channel, `${found.name} забанен модератором. Причина: ${reason || 'не указана'}`)
+}
+
+async function cmdUnban(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  if (!target) return cmdError('bad_args', 'Использование: /unban <ник>')
+  const found = findChatterByName(ctx.channel, target)
+  if (!found) return cmdError('user_not_found', `${target} не найден в чате`, 404)
+  qBanDel.run(found.uid)
+  emitSystem(ctx.channel, `${found.name} снова может писать в чат`)
+}
+
+async function cmdTimeout(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  const durRaw = ctx.args[1]
+  if (!target || !durRaw) {
+    return cmdError('bad_args', 'Использование: /timeout <ник> <время: 30, 10s, 5m, 1h> [причина]')
+  }
+  const dur = parseDuration(durRaw)
+  if (!dur) return cmdError('bad_args', 'Не понял длительность. Примеры: 30, 10s, 5m, 1h')
+  const reason = ctx.args.slice(2).join(' ').trim()
+  const found = findChatterByName(ctx.channel, target)
+  if (!found) return cmdError('user_not_found', `${target} не найден в чате`, 404)
+  qBanPut.run(found.uid, found.name, reason, Date.now() + dur * 1000)
+  emitSystem(
+    ctx.channel,
+    `${found.name} отправлен в тайм-аут на ${formatDuration(dur)}. Причина: ${reason || 'не указана'}`,
+  )
+}
+
+async function cmdClear(ctx: CmdCtx): Promise<CmdResult | void> {
+  history.delete(ctx.channel)
+  io.in(roomKey(ctx.channel)).emit('chat:clear', { channelSlug: ctx.channel })
+  emitSystem(ctx.channel, 'Чат очищен модератором')
+}
+
+async function cmdSlow(ctx: CmdCtx): Promise<CmdResult | void> {
+  const sec = parseInt(ctx.args[0] ?? '', 10)
+  if (!Number.isFinite(sec) || sec < 1) return cmdError('bad_args', 'Использование: /slow <секунд>')
+  const slowSec = Math.min(86_400, sec)
+  setChstate(ctx.channel, { slowSec })
+  emitSystem(ctx.channel, `Режим медленного чата: не чаще одного сообщения в ${slowSec}с`)
+}
+
+async function cmdSlowoff(ctx: CmdCtx): Promise<CmdResult | void> {
+  setChstate(ctx.channel, { slowSec: 0 })
+  emitSystem(ctx.channel, 'Медленный чат выключен')
+}
+
+async function cmdSubsonly(ctx: CmdCtx): Promise<CmdResult | void> {
+  const arg = (ctx.args[0] ?? '').toLowerCase()
+  if (arg !== 'on' && arg !== 'off') return cmdError('bad_args', 'Использование: /subsonly on|off')
+  setChstate(ctx.channel, { subsonly: arg === 'on' ? 1 : 0 })
+  emitSystem(ctx.channel, arg === 'on' ? 'Чат переведён в режим «только подписчики»' : 'Чат открыт для всех')
+}
+
+async function cmdShoutout(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  if (!target) return cmdError('bad_args', 'Использование: /so <ник>')
+  emitSystem(ctx.channel, `🎉 ПОДДЕРЖИМ ${target}! Загляните на канал — там вайб`)
+}
+
+async function cmdDelete(ctx: CmdCtx): Promise<CmdResult | void> {
+  const id = ctx.args[0]
+  if (!id) return cmdError('bad_args', 'Использование: /delete <id сообщения>')
+  const list = history.get(ctx.channel) ?? []
+  const msg = list.find((m) => m.id === id)
+  if (!msg || msg.deleted) return cmdError('not_found', 'Сообщение не найдено', 404)
+  msg.deleted = true
+  io.in(roomKey(ctx.channel)).emit('chat:delete', { channelSlug: ctx.channel, ids: [id] })
+}
+
+async function cmdMod(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  if (!target) return cmdError('bad_args', 'Использование: /mod <ник>')
+  const found = findChatterByName(ctx.channel, target)
+  if (!found) return cmdError('user_not_found', `${target} не найден в чате`, 404)
+  qModPut.run(found.uid, found.name, ctx.user.name)
+  emitSystem(ctx.channel, `${found.name} теперь модератор 🔑`)
+}
+
+async function cmdUnmod(ctx: CmdCtx): Promise<CmdResult | void> {
+  const target = ctx.args[0]
+  if (!target) return cmdError('bad_args', 'Использование: /unmod <ник>')
+  const found = findChatterByName(ctx.channel, target)
+  if (!found) return cmdError('user_not_found', `${target} не найден в чате`, 404)
+  qModDel.run(found.uid)
+  emitSystem(ctx.channel, `${found.name} больше не модератор`)
+}
+
+async function cmdCustom(ctx: CmdCtx): Promise<CmdResult | void> {
+  const sub = (ctx.args[0] ?? '').toLowerCase()
+  if (sub === 'add') {
+    const name = sanitizeCommandName(ctx.args[1] ?? '')
+    const response = ctx.args.slice(2).join(' ').trim()
+    if (!name || name.length > 32 || /\s/.test(name)) {
+      return cmdError('bad_args', 'Использование: /cmd add <имя> <текст ответа>')
+    }
+    if (response.length < 1 || response.length > 400) {
+      return cmdError('bad_args', 'Текст ответа: от 1 до 400 символов')
+    }
+    if (PUBLIC_BUILTINS.has(name)) return cmdError('bad_args', 'Это имя занято встроенной командой')
+    qCmdPut.run(name, response, ctx.user.name)
+    emitSystem(ctx.channel, `Команда !${name} добавлена`)
+    return
+  }
+  if (sub === 'remove') {
+    const name = sanitizeCommandName(ctx.args[1] ?? '')
+    if (!name) return cmdError('bad_args', 'Использование: /cmd remove <имя>')
+    const existing = qCmdGet.get(name)
+    if (!existing) return cmdError('not_found', `Команда !${name} не найдена`, 404)
+    qCmdDel.run(name)
+    emitSystem(ctx.channel, `Команда !${name} удалена`)
+    return
+  }
+  if (sub === 'list') {
+    const rows = qCmdAll.all()
+    const text = rows.length > 0 ? `Кастомные команды: ${rows.map((r) => '!' + r.name).join(', ')}` : 'Кастомных команд пока нет'
+    return { kind: 'sender', text }
+  }
+  return cmdError('bad_args', 'Использование: /cmd add <имя> <текст> | /cmd remove <имя> | /cmd list')
+}
+
+async function cmdDemo(ctx: CmdCtx): Promise<CmdResult | void> {
+  const arg = (ctx.args[0] ?? '').toLowerCase()
+  if (arg !== 'on' && arg !== 'off') return cmdError('bad_args', 'Использование: /demo on|off')
+  demoEnabled = arg === 'on'
+  setSetting('demo', arg)
+  if (!demoEnabled) nextDemoAt.clear()
+  emitSystem(ctx.channel, `Демо-чат ${arg === 'on' ? 'включён' : 'выключен'}`)
+}
+
+const MOD_COMMANDS: Record<string, (ctx: CmdCtx) => Promise<CmdResult | void>> = {
+  ban: cmdBan,
+  unban: cmdUnban,
+  timeout: cmdTimeout,
+  untimeout: cmdUnban,
+  clear: cmdClear,
+  slow: cmdSlow,
+  slowoff: cmdSlowoff,
+  subsonly: cmdSubsonly,
+  so: cmdShoutout,
+  delete: cmdDelete,
+  mod: cmdMod,
+  unmod: cmdUnmod,
+  cmd: cmdCustom,
+  demo: cmdDemo,
+}
+
+// --- public !-commands ------------------------------------------------------
+
+async function tryPublicCommand(channel: string, user: ChatUser, name: string): Promise<boolean> {
+  if (name === 'uptime') {
+    emitSystem(channel, await uptimeText(channel))
+    return true
+  }
+  if (name === 'title') {
+    emitSystem(channel, await titleText(channel))
+    return true
+  }
+  if (name === 'команды' || name === 'commands') {
+    emitSystem(channel, commandsListText())
+    return true
+  }
+  if (name === 'эмоции' || name === 'emotes') {
+    emitSystem(channel, emotesText())
+    return true
+  }
+  const custom = qCmdGet.get(name)
+  if (custom) {
+    emitSystem(channel, substituteName(custom.response, user.name))
+    return true
+  }
+  return false
+}
+
+/**
+ * Command dispatcher. Returns handled=false when the text is NOT a recognized
+ * command (unknown "!..." falls through as a normal chat message, exactly
+ * like on Twitch). Mod commands from VIEWERs are swallowed with a
+ * sender-only "forbidden" error.
+ */
+async function tryCommand(
+  channel: string,
+  user: ChatUser,
+  text: string,
+  socket: Socket | null,
+): Promise<{ handled: boolean; result?: CmdResult }> {
+  const parts = text.split(/\s+/)
+  const head = parts[0]
+  const args = parts.slice(1)
+
+  if (head.startsWith('/')) {
+    const role = effectiveRole(user)
+    const name = head.slice(1).trim().toLowerCase()
+    if (role === 'VIEWER') {
+      return {
+        handled: true,
+        result: cmdError('forbidden', 'Команды модератора доступны только модерам и владельцу', 403),
+      }
+    }
+    const handler = MOD_COMMANDS[name]
+    if (!handler) {
+      return { handled: true, result: cmdError('unknown_command', `Неизвестная команда ${head}. Введите !команды`) }
+    }
+    if (OWNER_ONLY_COMMANDS.has(name) && role !== 'OWNER') {
+      return { handled: true, result: cmdError('forbidden', 'Эта команда доступна только владельцу канала', 403) }
+    }
+    const result = await handler({ channel, user, role, args, socket })
+    return { handled: true, result }
+  }
+
+  if (head.startsWith('!')) {
+    const name = head.slice(1).trim().toLowerCase()
+    const handled = await tryPublicCommand(channel, user, name)
+    return handled ? { handled: true } : { handled: false }
+  }
+
+  return { handled: false }
+}
+
+// ---------------------------------------------------------------------------
+// Core message pipeline (shared by socket chat:send and POST /api/send)
+// ---------------------------------------------------------------------------
+
+interface PipelineResult {
+  ok: boolean
+  code?: string
+  message?: string
+  status?: number
+  /** normal accepted message */
+  msg?: ChatMsg
+  /** accepted command; senderOnly carries a private reply (/cmd list) */
+  command?: boolean
+  senderOnly?: ChatMsg
+}
+
+async function processChatText(
+  channel: string,
+  user: ChatUser,
+  text: string,
+  socket: Socket | null,
+): Promise<PipelineResult> {
+  // 1. ban / active timeout
+  const ban = getActiveBan(user.uid)
+  if (ban) {
+    return { ok: false, code: 'banned', message: banMessage(ban), status: 403 }
+  }
+
+  // 2. text validation
+  if (text.length < 1 || text.length > 500) {
+    return { ok: false, code: 'bad_text', message: 'Сообщение должно содержать от 1 до 500 символов', status: 400 }
+  }
+
+  // 3. subscriber-only gate (MOD/OWNER bypass; default on — v1 behaviour)
+  const st = getChstate(channel)
+  const role = effectiveRole(user)
+  if (st.subsonly === 1 && user.sub !== true && role === 'VIEWER') {
+    return { ok: false, code: 'subscribers_only', message: 'Чат доступен только платным подписчикам', status: 403 }
+  }
+
+  // 4. commands — handled BEFORE the rate limit, never persisted
+  if (text.startsWith('/') || text.startsWith('!')) {
+    const cmd = await tryCommand(channel, user, text, socket)
+    if (cmd.handled) {
+      const result: PipelineResult = { ok: true, command: true }
+      if (cmd.result && cmd.result.kind === 'error') {
+        result.ok = false
+        result.code = cmd.result.code
+        result.message = cmd.result.message
+        result.status = cmd.result.status
+        result.command = false
+      } else if (cmd.result && cmd.result.kind === 'sender') {
+        result.senderOnly = buildSystemMsg(channel, cmd.result.text)
+      }
+      return result
+    }
+    // unknown "!command" — falls through as a normal message
+  }
+
+  // 5. rate limit (slow mode raises the per-uid window)
+  const minInterval = Math.max(RATE_LIMIT_MS, st.slowSec * 1000)
+  const now = Date.now()
+  const last = lastSentAt.get(user.uid)
+  if (last !== undefined && now - last < minInterval) {
+    return { ok: false, code: 'rate_limited', message: 'Слишком часто. Подождите немного', status: 429 }
+  }
+
+  // 6. accept
+  const message: ChatMsg = {
+    id: randomUUID(),
+    channelSlug: channel,
+    uid: user.uid,
+    name: user.name,
+    color: user.color,
+    avatar: user.avatar,
+    text,
+    ts: now,
+    system: false,
+  }
+  if (role === 'OWNER' || role === 'MOD') message.role = role
+  lastSentAt.set(user.uid, now)
+  appendHistory(channel, message)
+  io.in(roomKey(channel)).emit('chat:message', { message })
+  persistMessage(channel, message) // fire-and-forget (skips demo:/system)
+  return { ok: true, msg: message }
+}
+
+// ---------------------------------------------------------------------------
+// Demo chat (fake VTuber viewers; in-memory only, never persisted)
+// ---------------------------------------------------------------------------
+
+const DEMO_USERS: Array<{ name: string; color: string }> = [
+  { name: 'нэко_фан', color: '#ff7bac' },
+  { name: 'MilkTea', color: '#7bd3ff' },
+  { name: 'PixelWitch', color: '#a970ff' },
+  { name: 'караоке_фан2007', color: '#ffb86b' },
+  { name: 'Соня_смотрит', color: '#c3e88d' },
+  { name: 'DeepDarkFan', color: '#8be9fd' },
+  { name: 'Гоша_клава', color: '#f97ac0' },
+  { name: 'NEETmode', color: '#d6bcff' },
+  { name: 'vibe_check', color: '#5ad1a4' },
+  { name: 'Аниме_Мама', color: '#ff8080' },
+  { name: 'лягушка_ква', color: '#a6e22e' },
+  { name: 'Профессор_Хаос', color: '#f78c6c' },
+  { name: 'ramen_enjoyer', color: '#e6db74' },
+  { name: 'Тихая_Гря', color: '#fd971f' },
+]
+
+const DEMO_TEXTS: string[] = [
+  'ГОЙДА НА КВЕСТ',
+  'KEKW она опять сгорела',
+  'какая песня?? шазам не берёт',
+  'РАСПИСАНИЕ ГДЕ',
+  'стрим дня спасён',
+  'этот босс на 1 хп FeelsWeirdMan',
+  'донатик улетел',
+  'лавандовый вайб AYAYA',
+  'chat двигайся',
+  'суб-чат лучший',
+  '!uptime',
+  'BasedGod',
+  'сегодня караоке??',
+  'модер тут железный',
+  'топ-1 стримерша',
+  'clutch of the year EZ',
+  'обожаю этот смайл peepoHappy',
+  'первый!!',
+  'ложусь спать… шучу смотрю дальше',
+  'PogChamp Clap',
+  'дайте две',
+  'чай заварен, продолжаем',
+  'POGGERS',
+  'ой всё',
+  'вайб непередаваемый',
+  'подписка оформлена, я дома',
+  '!uptime',
+]
+
+const nextDemoAt = new Map<string, number>() // channelSlug -> next demo message ts
+const DEMO_MIN_GAP = 7000
+const DEMO_MAX_GAP = 14_000
+
+function pick<T>(list: T[]): T {
+  return list[Math.floor(Math.random() * list.length)]
+}
+
+function emitDemoMessage(slug: string): void {
+  const u = pick(DEMO_USERS)
+  const text = pick(DEMO_TEXTS)
+  const message: ChatMsg = {
+    id: randomUUID(),
+    channelSlug: slug,
+    uid: `demo:${u.name}`,
+    name: u.name,
+    color: u.color,
+    avatar: null,
+    text,
+    ts: Date.now(),
+    system: false,
+  }
+  appendHistory(slug, message)
+  io.in(roomKey(slug)).emit('chat:message', { message })
+  if (text.startsWith('!')) {
+    // demo viewers can trigger public commands too (!uptime etc.)
+    const pseudo: ChatUser = {
+      uid: message.uid as string,
+      name: u.name,
+      color: u.color,
+      avatar: null,
+      slug: '',
+      sub: true,
+      adm: false,
+      role: 'VIEWER',
+      exp: Number.MAX_SAFE_INTEGER,
+    }
+    tryPublicCommand(slug, pseudo, text.split(/\s+/)[0].slice(1).trim().toLowerCase()).catch(
+      (err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.log(`[demo] command failed: ${msg}`)
+      },
+    )
+  }
+}
+
+setInterval(() => {
+  if (!demoEnabled) return
+  const now = Date.now()
+  for (const [room, members] of io.sockets.adapter.rooms) {
+    const name = String(room)
+    if (!name.startsWith('ch:')) continue // skip per-socket rooms
+    if (members.size === 0) continue
+    const slug = name.slice(3)
+    const at = nextDemoAt.get(slug)
+    if (at === undefined) {
+      nextDemoAt.set(slug, now + 2000 + Math.floor(Math.random() * 5000))
+      continue
+    }
+    if (now < at) continue
+    nextDemoAt.set(slug, now + DEMO_MIN_GAP + Math.floor(Math.random() * (DEMO_MAX_GAP - DEMO_MIN_GAP)))
+    emitDemoMessage(slug)
+  }
+}, 1500)
 
 // ---------------------------------------------------------------------------
 // Socket.io connection handling
@@ -294,11 +1384,15 @@ io.on('connection', (socket) => {
   socket.data.user = verifyToken((socket.handshake.auth as { token?: unknown } | undefined)?.token)
   socket.data.channel = null
 
+  // overlay / read-only watcher: handshake query watch=1 allows an anonymous join
+  const handshakeQuery = (socket.handshake.query ?? {}) as Record<string, unknown>
+  const isWatcher = handshakeQuery.watch === '1' || handshakeQuery.watch === 1
+
   socket.on('channel:join', (raw: unknown) => {
     const channelSlug = (raw as { channelSlug?: unknown } | null)?.channelSlug
     if (typeof channelSlug !== 'string' || channelSlug.length === 0) return
     const user = socket.data.user as ChatUser | null
-    if (!user) {
+    if (!user && !isWatcher) {
       socket.emit('system:error', { code: 'auth_required', message: 'Войдите, чтобы наблюдать за чатом' })
       return
     }
@@ -311,7 +1405,7 @@ io.on('connection', (socket) => {
     }
     socket.join(roomKey(channelSlug))
     socket.data.channel = channelSlug
-    socket.emit('chat:history', { channelSlug, messages: history.get(channelSlug) ?? [] })
+    socket.emit('chat:history', { channelSlug, messages: visibleHistory(channelSlug) })
     io.in(roomKey(channelSlug)).emit('presence:update', { channelSlug, count: roomCount(channelSlug) })
   })
 
@@ -330,39 +1424,26 @@ io.on('connection', (socket) => {
       socket.emit('system:error', { code: 'auth_required', message: 'Войдите через Telegram, чтобы писать в чат' })
       return
     }
-    if (user.sub !== true && user.adm !== true) {
-      socket.emit('system:error', { code: 'subscribers_only', message: 'Чат доступен только платным подписчикам' })
-      return
-    }
-    const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
-    if (text.length < 1 || text.length > 500) {
-      socket.emit('system:error', { code: 'bad_text', message: 'Сообщение должно содержать от 1 до 500 символов' })
-      return
-    }
     const channelSlug = payload?.channelSlug
     if (typeof channelSlug !== 'string' || channelSlug.length === 0) return
     if (socket.data.channel !== channelSlug) return // must be a room member
-    const now = Date.now()
-    const last = lastSentAt.get(user.uid)
-    if (last !== undefined && now - last < RATE_LIMIT_MS) {
-      socket.emit('system:error', { code: 'rate_limited', message: 'Слишком часто. Подождите немного' })
-      return
-    }
-    const message: ChatMsg = {
-      id: randomUUID(),
-      channelSlug,
-      uid: user.uid,
-      name: user.name,
-      color: user.color,
-      avatar: user.avatar,
-      text,
-      ts: now,
-      system: false,
-    }
-    lastSentAt.set(user.uid, now)
-    appendHistory(channelSlug, message)
-    io.in(roomKey(channelSlug)).emit('chat:message', { message })
-    persistMessage(channelSlug, message) // fire-and-forget
+    const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
+    processChatText(channelSlug, user, text, socket)
+      .then((result) => {
+        if (!result.ok && result.code) {
+          socket.emit('system:error', { code: result.code, message: result.message })
+          return
+        }
+        if (result.senderOnly) {
+          // private system reply (e.g. /cmd list) — sender's socket only
+          socket.emit('chat:message', { message: result.senderOnly })
+        }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.log(`[chat:send] failed: ${msg}`)
+        socket.emit('system:error', { code: 'internal', message: 'Внутренняя ошибка, попробуйте ещё раз' })
+      })
   })
 
   socket.on('disconnect', () => {
@@ -395,12 +1476,186 @@ setInterval(() => {
   }
   const anyPositive = Object.values(counts).some((n) => n > 0)
   const needsReset = [...lastReportedViewers.entries()].some(
-    ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0
+    ([slug, prev]) => prev > 0 && (counts[slug] ?? 0) === 0,
   )
   if (!anyPositive && !needsReset) return
   for (const [slug, n] of Object.entries(counts)) lastReportedViewers.set(slug, n)
   postJson(`${MAIN_APP_BASE}/api/internal/viewers`, { counts }, 'viewers')
 }, VIEWERS_INTERVAL_MS)
+
+// ---------------------------------------------------------------------------
+// Background jobs: emotes refresh (6h), expired bans cleanup (60s)
+// ---------------------------------------------------------------------------
+
+refreshEmotes()
+setInterval(refreshEmotes, EMOTES_REFRESH_MS)
+
+setInterval(() => {
+  try {
+    qBanCleanup.run(Date.now())
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.log(`[bans] cleanup failed: ${msg}`)
+  }
+}, BANS_CLEANUP_MS)
+
+// ---------------------------------------------------------------------------
+// OBS overlay page (browser source; transparent background, watch-only)
+// ---------------------------------------------------------------------------
+
+const OVERLAY_HTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BACKSTAGE chat overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.8.4/socket.io.min.js"></script>
+<style>
+  html, body {
+    background: transparent !important;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  #chat {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 10px 14px;
+    font-family: 'Golos Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 14%);
+  }
+  .msg {
+    color: #fff;
+    font-weight: 800;
+    font-size: var(--fs, 26px);
+    line-height: 1.32;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.95), 0 0 2px rgba(0,0,0,0.9);
+    word-break: break-word;
+    padding: 1px 0;
+    animation: fadein 0.22s ease-out both;
+  }
+  .msg .nm { font-weight: 600; margin-right: 7px; }
+  .msg .badge { margin-right: 4px; }
+  .msg .txt { font-weight: 800; }
+  .msg.sys { font-style: italic; font-weight: 600; color: #a970ff; }
+  .msg img.emote { height: 1.85em; width: auto; vertical-align: -0.35em; margin: -1px 1px; }
+  @keyframes fadein {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+<div id="chat" role="log" aria-live="polite"></div>
+<script>
+(function () {
+  'use strict';
+  var qs = new URLSearchParams(location.search);
+  var CHANNEL = __CHANNEL_JSON__;
+  var SCALE = __SCALE_JSON__;
+  var PORT = qs.get('XTransformPort') || '3003';
+  var MAX = 30;
+  var box = document.getElementById('chat');
+  box.style.setProperty('--fs', Math.round(26 * SCALE) + 'px');
+
+  // emotes (7TV/BTTV/FFZ) rendered as <img> by exact word match
+  var emotes = {};
+  fetch('/api/emotes?XTransformPort=' + encodeURIComponent(PORT))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || !d.emotes) return;
+      for (var i = 0; i < d.emotes.length; i++) emotes[d.emotes[i].name] = d.emotes[i].url;
+    })
+    .catch(function () {});
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function renderText(text) {
+    var parts = String(text).split(/(\\s+)/);
+    var out = '';
+    for (var i = 0; i < parts.length; i++) {
+      var tok = parts[i];
+      if (!tok) continue;
+      if (tok.trim() === '') { out += tok; continue; }
+      var url = emotes[tok];
+      if (url) {
+        out += '<img class="emote" src="' + esc(url) + '" alt="' + esc(tok) + '" title="' + esc(tok) + '">';
+      } else {
+        out += esc(tok);
+      }
+    }
+    return out;
+  }
+
+  function render(m) {
+    var div = document.createElement('div');
+    div.className = m.system ? 'msg sys' : 'msg';
+    div.setAttribute('data-id', m.id || '');
+    var html = '';
+    if (m.system) {
+      html = renderText(m.text);
+    } else {
+      if (m.role === 'OWNER') html += '<span class="badge">👑</span>';
+      else if (m.role === 'MOD') html += '<span class="badge">🗡</span>';
+      html += '<span class="nm" style="color:' + esc(m.color || '#a970ff') + '">' + esc(m.name) + ':</span>';
+      html += '<span class="txt">' + renderText(m.text) + '</span>';
+    }
+    div.innerHTML = html;
+    return div;
+  }
+
+  function push(m) {
+    box.appendChild(render(m));
+    while (box.childElementCount > MAX) box.removeChild(box.firstElementChild);
+  }
+
+  var socket = io('/?XTransformPort=' + encodeURIComponent(PORT) + '&watch=1', {
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionDelay: 1000,
+    timeout: 10000
+  });
+
+  socket.on('connect', function () {
+    socket.emit('channel:join', { channelSlug: CHANNEL });
+  });
+  socket.on('chat:history', function (d) {
+    if (!d || d.channelSlug !== CHANNEL) return;
+    box.innerHTML = '';
+    var ms = (d.messages || []).filter(function (m) { return !m.deleted; });
+    for (var i = Math.max(0, ms.length - MAX); i < ms.length; i++) push(ms[i]);
+  });
+  socket.on('chat:message', function (d) {
+    if (d && d.message && (!d.message.channelSlug || d.message.channelSlug === CHANNEL)) push(d.message);
+  });
+  socket.on('chat:clear', function (d) {
+    if (!d || d.channelSlug === CHANNEL) box.innerHTML = '';
+  });
+  socket.on('chat:delete', function (d) {
+    if (!d || !d.ids) return;
+    for (var i = 0; i < d.ids.length; i++) {
+      var el = box.querySelector('[data-id="' + d.ids[i] + '"]');
+      if (el) el.remove();
+    }
+  });
+})();
+</script>
+</body>
+</html>
+`
 
 // ---------------------------------------------------------------------------
 // Engine errors + startup
@@ -411,5 +1666,6 @@ io.engine.on('connection_error', (err: { code?: number; message?: string }) => {
 })
 
 httpServer.listen(PORT, () => {
-  console.log('backstage-chat listening on :3003')
+  console.log('backstage-chat v2 listening on :3003')
+  console.log(`demo chat: ${demoEnabled ? 'on' : 'off'} (DEMO_CHAT=${DEMO_ENV ? '1' : '0'})`)
 })

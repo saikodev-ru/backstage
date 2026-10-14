@@ -1,6 +1,9 @@
 // Общие типы «Бэкстейдж» — используются и на сервере, и на клиенте.
 
-export type Role = "VIEWER" | "STREAMER" | "ADMIN";
+export type Role = "VIEWER" | "MOD" | "STREAMER" | "ADMIN";
+
+/** Роль в чате: владелец канала / модератор / зритель */
+export type ChatRole = "OWNER" | "MOD" | "VIEWER";
 
 export type PublicUser = {
   id: string;
@@ -50,6 +53,10 @@ export type ChatMessageDto = {
   text: string;
   ts: number;
   system: boolean;
+  /** Бейдж отправителя (для UI) */
+  role?: ChatRole;
+  /** Сообщение удалено модератором */
+  deleted?: boolean;
 };
 
 export type AuthConfigDto = {
@@ -104,4 +111,11 @@ export type CollabDto = {
   members: CollabMemberDto[];
   status: "idea" | "planning" | "confirmed";
   plannedAt: string | null;
+};
+
+export type EmoteDto = {
+  name: string;
+  provider: "7tv" | "bttv" | "ffz";
+  url: string;
+  zeroUrl?: string;
 };

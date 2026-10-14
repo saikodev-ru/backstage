@@ -85,12 +85,12 @@ export function useAuthActions() {
   );
 
   const loginDemo = useCallback(
-    async (name: string, subscriber: boolean, admin: boolean) => {
+    async (name: string, subscriber: boolean, admin: boolean, mod = false) => {
       try {
         const data = await jsonFetch<{ user: PublicUser }>("/api/auth/demo", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name, subscriber, admin }),
+          body: JSON.stringify({ name, subscriber, admin, mod }),
         });
         setUser(data.user);
         setAuthOpen(false);

@@ -32,8 +32,8 @@ export function BrandMark({ withText = true }: { withText?: boolean }) {
         </svg>
       </span>
       {withText && (
-        <span className="text-lg font-bold tracking-tight">
-          Бэк<span className="text-primary">стейдж</span>
+        <span className="brand text-base sm:text-lg" aria-label="BACKSTAGE">
+          BACK<span className="text-primary">STAGE</span>
         </span>
       )}
     </span>
@@ -115,9 +115,9 @@ export function TopBar() {
             onBlur={() => {
               blurTimer.current = setTimeout(() => setFocused(false), 150);
             }}
-            placeholder="Поиск каналов и эфиров"
+            placeholder="ПОИСК ЭФИРОВ И КЛИПОВ"
             aria-label="Поиск"
-            className="border-border bg-[#1a1a21] pl-9 focus-visible:ring-primary/60"
+            className="label-caps border-border bg-[#1a1a21] pl-9 text-xs text-foreground/90 placeholder:text-muted-foreground/50 focus-visible:ring-primary/60"
           />
           {showResults && (
             <div
@@ -224,9 +224,9 @@ export function TopBar() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Button onClick={() => setAuthOpen(true)} className="ml-1 gap-2">
+            <Button onClick={() => setAuthOpen(true)} className="label-caps ml-1 gap-2">
               <UserRound className="size-4" />
-              Войти
+              ВОЙТИ
             </Button>
           )}
         </div>
@@ -240,9 +240,9 @@ export function TopBar() {
             autoFocus
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Поиск каналов и эфиров"
+            placeholder="ПОИСК ЭФИРОВ И КЛИПОВ"
             aria-label="Поиск"
-            className="border-border bg-[#1a1a21] pl-9"
+            className="label-caps border-border bg-[#1a1a21] pl-9 text-xs text-foreground/90 placeholder:text-muted-foreground/50"
           />
           {results.length > 0 && (
             <div className="mt-1 overflow-hidden rounded-lg border border-border bg-popover">

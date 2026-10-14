@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   BOT_USERNAME,
+  DEMO_LOGIN,
   TELEGRAM_CHANNEL_LINK,
   botConfigured,
   subscriptionCheckConfigured,
@@ -13,7 +14,7 @@ export async function GET() {
     botUsername: BOT_USERNAME || null,
     botConfigured,
     subscriptionCheckConfigured,
-    demoMode: !botConfigured,
+    demoMode: DEMO_LOGIN || !botConfigured,
     channelLink: TELEGRAM_CHANNEL_LINK || null,
   });
 }

@@ -14,6 +14,8 @@ export type ChatTokenPayload = {
   slug: string;
   sub: boolean;
   adm: boolean;
+  /** Роль в чате: владелец канала / модератор / зритель */
+  role: "OWNER" | "MOD" | "VIEWER";
   exp: number;
 };
 
@@ -38,6 +40,8 @@ function sign(payloadJson: string): string {
 }
 
 export function issueChatToken(user: PublicUser): string {
+  const role: ChatTokenPayload["role"] =
+    user.role === "ADMIN" ? "OWNER" : user.role === "MOD" ? "MOD" : "VIEWER";
   const payload: ChatTokenPayload = {
     uid: user.id,
     name: [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "Гость",
@@ -46,6 +50,7 @@ export function issueChatToken(user: PublicUser): string {
     slug: user.username ?? user.telegramId ?? user.id,
     sub: user.isSubscriber,
     adm: user.role === "ADMIN",
+    role,
     exp: Date.now() + 24 * 60 * 60 * 1000,
   };
   const json = JSON.stringify(payload);

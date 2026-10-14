@@ -1,12 +1,13 @@
 "use client";
 
 // Общие карточки витрины «Бэкстейдж»: каналы, клипы, записи, расписание.
+// Все превью — SmartImage с blur-up low-res плейсхолдерами.
 
-import { useState } from "react";
-import { Calendar, Clock, Play, Users } from "lucide-react";
+import { Calendar, Clock, Play } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { SmartImage } from "@/components/backstage/smart-image";
 import type { ClipDto, PublicChannel, RecordingDto, ScheduleDto } from "@/lib/types";
 import { formatCount, formatDuration, formatUptime, formatWhen } from "@/components/backstage/hooks";
 import { useBackstageStore } from "@/components/backstage/store";
@@ -15,12 +16,12 @@ import { useBackstageStore } from "@/components/backstage/store";
 export function LiveBadge({ viewers, uptime }: { viewers?: number; uptime?: string }) {
   return (
     <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-2">
-      <span className="flex items-center gap-1.5 rounded-sm bg-live px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+      <span className="label-caps flex items-center gap-1.5 rounded-sm bg-live px-1.5 py-0.5 text-[11px] text-white">
         <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
         Live
       </span>
       {typeof viewers === "number" && viewers > 0 && (
-        <span className="rounded-sm bg-black/75 px-1.5 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">
+        <span className="label-caps rounded-sm bg-black/75 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
           {formatCount(viewers)}
         </span>
       )}
@@ -33,7 +34,7 @@ export function LiveBadge({ viewers, uptime }: { viewers?: number; uptime?: stri
   );
 }
 
-/** Превью 16:9 с фолбэком на градиент + буква канала */
+/** Превью 16:9 с blur-up плейсхолдером low-res */
 export function Thumb({
   src,
   alt,
@@ -41,6 +42,7 @@ export function Thumb({
   label,
   className,
   children,
+  eager = false,
 }: {
   src?: string | null;
   alt: string;
@@ -48,38 +50,24 @@ export function Thumb({
   label: string;
   className?: string;
   children?: React.ReactNode;
+  eager?: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
   return (
     <div
       className={cn(
-        "relative aspect-video w-full overflow-hidden rounded-lg bg-[#15151b]",
+        "group relative aspect-video w-full overflow-hidden rounded-lg bg-[#15151b]",
         className
       )}
     >
-      {src && !failed ? (
-        <img
-          src={src}
-          alt={alt}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          className="size-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
-        />
-      ) : (
-        <div
-          className="grid size-full place-items-center"
-          style={{
-            background: `radial-gradient(120% 120% at 30% 20%, ${accent}40 0%, #16161c 55%), linear-gradient(160deg, #1a1a22 0%, #121217 100%)`,
-          }}
-        >
-          <span
-            className="text-4xl font-black tracking-tight opacity-30"
-            style={{ color: accent }}
-          >
-            {label.slice(0, 1).toUpperCase()}
-          </span>
-        </div>
-      )}
+      <SmartImage
+        src={src}
+        alt={alt}
+        accent={accent}
+        label={label}
+        eager={eager}
+        className="absolute inset-0"
+        imgClassName="transition-transform duration-500 group-hover:scale-[1.03]"
+      />
       {children}
     </div>
   );
@@ -100,7 +88,7 @@ export function LiveChannelCard({ channel, hero = false }: { channel: PublicChan
       )}
       aria-label={`${channel.name}: ${channel.liveTitle ?? "в эфире"}`}
     >
-      <Thumb src={channel.livePreviewUrl} alt={channel.name} accent={channel.accentColor} label={channel.name}>
+      <Thumb src={channel.livePreviewUrl} alt={channel.name} accent={channel.accentColor} label={channel.name} eager={hero}>
         <LiveBadge viewers={viewer} uptime={uptime} />
         <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent opacity-80" />
         <span className="pointer-events-none absolute inset-0 hidden place-items-center group-hover:grid">
@@ -120,15 +108,15 @@ export function LiveChannelCard({ channel, hero = false }: { channel: PublicChan
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">
-          <div className={cn("truncate font-semibold", hero ? "text-base sm:text-lg" : "text-sm")}>
+          <div className={cn("card-title truncate", hero ? "text-base sm:text-lg" : "text-sm")}>
             {channel.liveTitle ?? `${channel.name} в эфире`}
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground/80">{channel.name}</span>
+          <div className="label-caps mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <span className="text-foreground/80">{channel.name}</span>
             {channel.liveCategory && (
               <>
                 <span aria-hidden>·</span>
-                <span className="rounded-sm bg-secondary px-1.5 py-px text-[11px]">{channel.liveCategory}</span>
+                <span className="rounded-sm bg-secondary px-1.5 py-px">{channel.liveCategory}</span>
               </>
             )}
           </div>
@@ -160,7 +148,7 @@ export function OfflineChannelCard({ channel }: { channel: PublicChannel }) {
           <Thumb src={channel.bannerUrl} alt={channel.name} accent={channel.accentColor} label={channel.name} className="absolute inset-0 opacity-30 blur-[1px] saturate-50" />
         </div>
         <span className="absolute inset-0 grid place-items-center">
-          <span className="rounded-sm bg-black/60 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+          <span className="label-caps rounded-sm bg-black/60 px-2 py-1 text-[11px] text-white/70">
             Оффлайн
           </span>
         </span>
@@ -176,7 +164,7 @@ export function OfflineChannelCard({ channel }: { channel: PublicChannel }) {
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{channel.name}</div>
+          <div className="card-title truncate text-sm">{channel.name}</div>
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{channel.tagline ?? `@${channel.handle}`}</div>
           <div className="mt-1 text-xs text-muted-foreground/70">
             {formatCount(channel.followers)} подписчиков
@@ -193,7 +181,7 @@ export function ClipCard({ clip, channel }: { clip: ClipDto; channel?: PublicCha
   return (
     <div className="group w-full cursor-pointer">
       <Thumb src={clip.thumbnailUrl} alt={clip.title} accent={accent} label={channel?.name ?? clip.channelSlug}>
-        <span className="absolute bottom-2 right-2 rounded-sm bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold text-white">
+        <span className="label-caps absolute bottom-2 right-2 rounded-sm bg-black/80 px-1.5 py-0.5 text-[11px] text-white">
           {formatDuration(clip.durationSec)}
         </span>
         <span className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100">
@@ -213,8 +201,8 @@ export function ClipCard({ clip, channel }: { clip: ClipDto; channel?: PublicCha
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">
-          <div className="line-clamp-2 text-sm font-medium leading-snug">{clip.title}</div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
+          <div className="card-title line-clamp-2 text-sm leading-snug">{clip.title}</div>
+          <div className="label-caps mt-0.5 text-[11px] text-muted-foreground">
             {channel?.name ?? clip.channelSlug} · {formatCount(clip.views)} просмотров
           </div>
         </div>
@@ -229,16 +217,16 @@ export function RecordingCard({ recording, channel }: { recording: RecordingDto;
   return (
     <div className="group w-full cursor-pointer">
       <Thumb src={recording.thumbnailUrl} alt={recording.title} accent={accent} label={channel?.name ?? recording.channelSlug}>
-        <span className="absolute bottom-2 right-2 rounded-sm bg-black/80 px-1.5 py-0.5 text-[11px] font-semibold text-white">
+        <span className="label-caps absolute bottom-2 right-2 rounded-sm bg-black/80 px-1.5 py-0.5 text-[11px] text-white">
           {formatDuration(recording.durationSec)}
         </span>
-        <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-sm bg-black/70 px-1.5 py-0.5 text-[11px] font-medium text-white/90">
+        <span className="label-caps absolute left-2 top-2 flex items-center gap-1.5 rounded-sm bg-black/70 px-1.5 py-0.5 text-[11px] text-white/90">
           <Play className="size-3 fill-white text-white" /> Запись
         </span>
       </Thumb>
       <div className="mt-2">
-        <div className="line-clamp-1 text-sm font-medium">{recording.title}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
+        <div className="card-title line-clamp-1 text-sm">{recording.title}</div>
+        <div className="label-caps mt-0.5 text-[11px] text-muted-foreground">
           {channel?.name ?? recording.channelSlug} · {formatCount(recording.views)} просмотров
         </div>
       </div>
@@ -257,20 +245,20 @@ export function ScheduleRow({ entry, channel }: { entry: ScheduleDto; channel?: 
       className="flex w-full items-center gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40 hover:bg-accent/30 sm:gap-4 sm:p-4"
     >
       <div
-        className="flex w-16 shrink-0 flex-col items-center rounded-md py-2"
+        className="label-caps flex w-16 shrink-0 flex-col items-center rounded-md py-2"
         style={{ backgroundColor: `${accent}1a`, color: accent }}
       >
         <Calendar className="size-4" aria-hidden />
-        <span className="mt-1 text-[11px] font-semibold leading-tight">{when.day}</span>
+        <span className="mt-1 text-[11px] leading-tight">{when.day}</span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold sm:text-base">{entry.title}</div>
+        <div className="card-title truncate text-sm sm:text-base">{entry.title}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
             <Clock className="size-3.5" aria-hidden />
             {when.time} · {Math.round(entry.durationMin / 60 * 10) / 10} ч
           </span>
-          {channel && <span className="font-medium text-foreground/70">{channel.name}</span>}
+          {channel && <span className="font-semibold text-foreground/70">{channel.name}</span>}
           {entry.category && (
             <span className="rounded-sm bg-secondary px-1.5 py-px text-[11px]">{entry.category}</span>
           )}
@@ -282,7 +270,7 @@ export function ScheduleRow({ entry, channel }: { entry: ScheduleDto; channel?: 
       <Badge
         variant="secondary"
         className={cn(
-          "shrink-0",
+          "label-caps shrink-0 text-[11px]",
           when.relative === "идёт сейчас" && "bg-live/15 text-[#ff6b6b] hover:bg-live/15"
         )}
       >

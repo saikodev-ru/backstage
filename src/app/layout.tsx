@@ -1,24 +1,33 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Golos_Text, Unbounded } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const inter = Inter({
-  variable: "--font-inter",
+// Толстая типографика «Бэкстейдж»:
+//  - Golos Text (400–900, кириллица) — основной текст, по умолчанию weight 500
+//  - Unbounded (500–900, кириллица) — дисплейный: лого, заголовки, навигация
+const golos = Golos_Text({
+  variable: "--font-golos",
+  subsets: ["latin", "cyrillic"],
+  display: "swap",
+});
+
+const unbounded = Unbounded({
+  variable: "--font-unbounded",
   subsets: ["latin", "cyrillic"],
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Бэкстейдж — приватные трансляции",
+  title: "BACKSTAGE — приватные трансляции dypaGPT",
   description:
-    "Бэкстейдж: платформа приватных трансляций для платных подписчиков. Эфиры, клипы, записи и расписание. Авторизация через Telegram.",
-  keywords: ["Бэкстейдж", "стрим", "трансляции", "Telegram", "приватный стрим", "подписка"],
+    "BACKSTAGE: приватная стрим-платформа dypaGPT для платных подписчиков. Эфиры, клипы, записи и расписание. Авторизация через Telegram.",
+  keywords: ["BACKSTAGE", "Бэкстейдж", "dypaGPT", "VTuber", "стрим", "трансляции", "Telegram", "приватный стрим", "подписка"],
   authors: [{ name: "SaikoDev" }],
   openGraph: {
-    title: "Бэкстейдж — приватные трансляции",
+    title: "BACKSTAGE — приватные трансляции dypaGPT",
     description: "Twitch-опыт для платных подписчиков. Эфиры, клипы, записи, расписание.",
-    siteName: "Бэкстейдж",
+    siteName: "BACKSTAGE",
     type: "website",
   },
 };
@@ -36,7 +45,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru" className="dark" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
+      <body
+        className={`${golos.variable} ${unbounded.variable} font-sans font-medium antialiased bg-background text-foreground`}
+      >
         {children}
         <Toaster />
       </body>

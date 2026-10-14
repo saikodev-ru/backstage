@@ -26,9 +26,9 @@ export function ScheduleView() {
       <header className="fade-up flex items-center gap-3">
         <CalendarDays className="size-6 text-primary" />
         <div>
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Расписание</h1>
+          <h1 className="headline text-xl sm:text-2xl">Расписание</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Ближайшие эфиры всех авторов Бэкстейджа
+            Неделя эфиров dypaGPT
           </p>
         </div>
       </header>
@@ -48,7 +48,7 @@ export function ScheduleView() {
         <div className="space-y-6">
           {Object.entries(days).map(([day, entries]) => (
             <section key={day} aria-label={day} className="fade-up">
-              <h2 className="mb-2.5 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+              <h2 className="label-caps mb-2.5 text-[12px] text-primary/90">
                 {day}
               </h2>
               <div className="space-y-2.5">

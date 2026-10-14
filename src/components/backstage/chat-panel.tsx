@@ -1,18 +1,103 @@
 "use client";
 
-// Чат трансляции: socket.io мини-сервис (порт 3003 через XTransformPort).
+// Чат трансляции v2: socket.io мини-сервис (порт 3003 через XTransformPort).
+// Эмодзи 7TV/BTTV/FFZ, бейджи OWNER/MOD, инструменты модерации, команды.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { Crown, Lock, MessageSquare, Send, Users } from "lucide-react";
+import { Crown, Lock, MessageSquare, Send, SmilePlus, Sword, Trash2, Users, Zap, Ban, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useAutoScroll } from "@/components/backstage/hooks";
 import { toast } from "@/hooks/use-toast";
-import type { ChatMessageDto } from "@/lib/types";
+import type { ChatMessageDto, EmoteDto } from "@/lib/types";
+
+const CHAT_BASE = "/?XTransformPort=3003";
+
+type EmoteMap = Map<string, EmoteDto>;
+
+async function fetchChatJson<T>(path: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}XTransformPort=3003`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Разбивает текст на слова; слова-эмодзи рендерит картинками (Twitch-стиль) */
+function MessageText({ text, emotes }: { text: string; emotes: EmoteMap }) {
+  if (emotes.size === 0) return <span className="text-foreground/90">{text}</span>;
+  const parts = text.split(/(\s+)/);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const emote = emotes.get(part);
+        if (emote) {
+          return (
+            <img
+              key={i}
+              src={emote.url}
+              alt={part}
+              title={`${part} · ${emote.provider.toUpperCase()}`}
+              loading="lazy"
+              className="mx-0.5 inline-block h-[1.55em] w-auto align-[-0.38em]"
+            />
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+/** Пикер эмодзи с табами провайдеров */
+function EmotePicker({ emotes, onPick }: { emotes: EmoteDto[]; onPick: (name: string) => void }) {
+  const [tab, setTab] = useState<"7tv" | "bttv" | "ffz">("7tv");
+  const providers: Array<"7tv" | "bttv" | "ffz"> = ["7tv", "bttv", "ffz"];
+  const list = emotes.filter((e) => e.provider === tab);
+
+  return (
+    <div className="w-[min(20rem,calc(100vw-5rem))]">
+      <div className="label-caps flex gap-1 border-b border-border pb-1.5">
+        {providers.map((p) => (
+          <button
+            key={p}
+            onClick={() => setTab(p)}
+            className={cn(
+              "rounded-sm px-2 py-1 text-[11px] transition-colors",
+              tab === p ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-secondary"
+            )}
+          >
+            {p.toUpperCase()}
+          </button>
+        ))}
+        <span className="ml-auto self-center text-[10px] text-muted-foreground/60">{list.length}</span>
+      </div>
+      <div className="grid max-h-72 grid-cols-[repeat(auto-fill,minmax(2.4rem,1fr))] gap-1 overflow-y-auto p-1.5">
+        {list.map((e) => (
+          <button
+            key={`${e.provider}-${e.name}`}
+            onClick={() => onPick(e.name)}
+            title={e.name}
+            aria-label={`Вставить эмодзи ${e.name}`}
+            className="grid aspect-square place-items-center rounded-md p-1 transition-colors hover:bg-secondary"
+          >
+            <img src={e.url} alt={e.name} loading="lazy" className="size-6 object-contain" />
+          </button>
+        ))}
+        {list.length === 0 && (
+          <p className="col-span-full py-6 text-center text-xs text-muted-foreground">Эмодзи не загрузились</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function ChatPanel({ channelSlug, className }: { channelSlug: string; className?: string }) {
   const user = useBackstageStore((s) => s.user);
@@ -25,9 +110,22 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
   const [draft, setDraft] = useState("");
   const [token, setToken] = useState<string | null>(null);
 
+  const [emotes, setEmotes] = useState<EmoteDto[]>([]);
+  const [modUids, setModUids] = useState<string[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [target, setTarget] = useState<{ id: string; uid: string | null; name: string } | null>(null);
+
   const socketRef = useRef<Socket | null>(null);
   const { ref, pending, scrollToBottom } = useAutoScroll(messages);
-  const canSend = Boolean(user && (user.isSubscriber || user.role === "ADMIN"));
+  const emoteMap = useMemo(() => {
+    const m: EmoteMap = new Map();
+    for (const e of emotes) if (!m.has(e.name)) m.set(e.name, e);
+    return m;
+  }, [emotes]);
+
+  const isOwner = user?.role === "ADMIN";
+  const isMod = isOwner || user?.role === "MOD" || (user ? modUids.includes(user.id) : false);
+  const canSend = Boolean(user && (user.isSubscriber || user.role === "ADMIN" || user.role === "MOD"));
 
   // ── Токен чата ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -51,12 +149,26 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
     };
   }, [user]);
 
+  // ── Эмодзи + список модов (REST чат-сервиса) ────────────────────────────
+  useEffect(() => {
+    let alive = true;
+    void fetchChatJson<{ emotes: EmoteDto[] }>("/api/emotes").then((d) => {
+      if (alive && d?.emotes) setEmotes(d.emotes);
+    });
+    void fetchChatJson<{ mods: Array<{ uid: string }> }>(`/api/mods?channel=${encodeURIComponent(channelSlug)}`).then((d) => {
+      if (alive && d?.mods) setModUids(d.mods.map((m) => m.uid));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [channelSlug, connected]);
+
   // ── Подключение к чат-сервису ──────────────────────────────────────────
   useEffect(() => {
     if (!token) return;
 
     // Подключение строго через XTransformPort (шлюз Caddy), путь /
-    const socket = io("/?XTransformPort=3003", {
+    const socket = io(CHAT_BASE, {
       auth: { token },
       transports: ["websocket", "polling"],
       reconnection: true,
@@ -83,13 +195,24 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       setMessages((prev) => [...prev.slice(-199), data.message]);
     });
 
+    socket.on("chat:clear", (data: { channelSlug: string }) => {
+      if (data.channelSlug !== channelSlug) return;
+      setMessages([]);
+    });
+
+    socket.on("chat:delete", (data: { channelSlug: string; ids: string[] }) => {
+      if (data.channelSlug !== channelSlug) return;
+      const ids = new Set(data.ids);
+      setMessages((prev) => prev.filter((m) => !ids.has(m.id)));
+    });
+
     socket.on("presence:update", (data: { channelSlug: string; count: number }) => {
       if (data.channelSlug === channelSlug) setViewers(data.count);
     });
 
     socket.on("system:error", (data: { code: string; message: string }) => {
-      if (data.code === "rate_limited") {
-        toast({ title: "Не так часто", description: data.message, variant: "destructive" });
+      if (data.code === "rate_limited" || data.code === "banned" || data.code === "forbidden") {
+        toast({ title: "Чат", description: data.message, variant: "destructive" });
       }
     });
 
@@ -108,9 +231,28 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
     if (!text || !socketRef.current || !canSend) return;
     socketRef.current.emit("chat:send", { channelSlug, text });
     setDraft("");
+    setTarget(null);
   }, [draft, channelSlug, canSend]);
 
+  const runCommand = useCallback(
+    (cmd: string) => {
+      if (!socketRef.current || !canSend) return;
+      socketRef.current.emit("chat:send", { channelSlug, text: cmd });
+    },
+    [channelSlug, canSend]
+  );
+
+  const insertEmote = useCallback(
+    (name: string) => {
+      setDraft((d) => (d.length === 0 || d.endsWith(" ") ? `${d}${name} ` : `${d} ${name} `));
+      setPickerOpen(false);
+    },
+    []
+  );
+
   const list = useMemo(() => messages.slice(-100), [messages]);
+  const showCommandHint =
+    canSend && (draft.startsWith("/") || draft.startsWith("!")) && draft.length <= 24;
 
   return (
     <section
@@ -118,9 +260,14 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
       className={cn("flex h-full min-h-0 flex-col border-border bg-[#141419]", className)}
     >
       {/* Заголовок */}
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header className="label-caps flex h-11 shrink-0 items-center gap-2 border-b border-border px-3 text-[12px]">
         <MessageSquare className="size-4 text-primary" aria-hidden />
-        <h2 className="text-sm font-semibold">Чат трансляции</h2>
+        <h2>ЧАТ ЭФИРА</h2>
+        {emotes.length > 0 && (
+          <span className="rounded-sm bg-secondary px-1.5 py-px text-[10px] text-muted-foreground" title="7TV · BTTV · FFZ">
+            {emotes.length} ЭМОЦИЙ
+          </span>
+        )}
         <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5" title="Зрителей в чате">
             <Users className="size-3.5" aria-hidden />
@@ -144,18 +291,28 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
         >
           {list.length === 0 && (
             <div className="grid h-full place-items-center">
-              <p className="max-w-52 text-center text-xs text-muted-foreground/60">
-                {user ? "Сообщений пока нет. Начните первым!" : "Войдите, чтобы читать чат"}
+              <p className="label-caps max-w-52 text-center text-[11px] text-muted-foreground/60">
+                {user ? "Сообщений пока нет" : "Войдите, чтобы читать чат"}
               </p>
             </div>
           )}
           {list.map((m) =>
             m.system ? (
-              <div key={m.id} className="fade-up px-2 py-1.5 text-center text-xs italic text-primary/80">
+              <div key={m.id} className="fade-up px-2 py-1.5 text-center text-xs italic text-primary/85">
                 {m.text}
               </div>
             ) : (
-              <div key={m.id} className="fade-up group/msg flex gap-2 px-1 py-1 hover:bg-secondary/40 rounded-sm">
+              <div
+                key={m.id}
+                className={cn(
+                  "fade-up group/msg flex gap-2 rounded-sm px-1 py-1 hover:bg-secondary/40",
+                  target?.id === m.id && "bg-secondary/60"
+                )}
+                onClick={() => {
+                  if (!m.system && m.uid && isMod) setTarget({ id: m.id, uid: m.uid, name: m.name });
+                  else setTarget(null);
+                }}
+              >
                 <Avatar className="mt-0.5 size-6 rounded-full ring-1 ring-border">
                   <AvatarImage src={m.avatar ?? undefined} alt={m.name} />
                   <AvatarFallback
@@ -166,10 +323,22 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
                   </AvatarFallback>
                 </Avatar>
                 <p className="min-w-0 flex-1 break-words">
-                  <span className="mr-1.5 font-semibold" style={{ color: m.color }}>
+                  {m.role === "OWNER" && (
+                    <Crown
+                      className="mr-1 inline size-3.5 -translate-y-px text-[#ffb86b]"
+                      aria-label="Владелец канала"
+                    />
+                  )}
+                  {m.role === "MOD" && (
+                    <Sword
+                      className="mr-1 inline size-3.5 -translate-y-px text-[#5ad1a4]"
+                      aria-label="Модератор"
+                    />
+                  )}
+                  <span className="mr-1.5 font-bold" style={{ color: m.color }}>
                     {m.name}
                   </span>
-                  <span className="text-foreground/90">{m.text}</span>
+                  <MessageText text={m.text} emotes={emoteMap} />
                 </p>
               </div>
             )
@@ -179,47 +348,137 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
         {pending > 0 && (
           <button
             onClick={scrollToBottom}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-lg shadow-primary/30"
+            className="label-caps absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1 text-[11px] text-primary-foreground shadow-lg shadow-primary/30"
           >
-            {pending} новых ↓
+            {pending} НОВЫХ ↓
           </button>
         )}
       </div>
+
+      {/* Панель модерации: клик по сообщению (только моды) */}
+      {target && isMod && (
+        <div className="fade-up shrink-0 border-t border-border bg-secondary/40 px-2.5 py-2">
+          <div className="label-caps flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            <Sword className="size-3.5 text-[#5ad1a4]" aria-hidden />
+            МОДЕРАЦИЯ · {target.name}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <Button
+              size="sm"
+              variant="secondary"
+              className="label-caps h-8 gap-1.5 px-2 text-[10px]"
+              onClick={() => {
+                runCommand(`/delete ${target.id}`);
+                setTarget(null);
+              }}
+            >
+              <Trash2 className="size-3.5" /> УДАЛИТЬ
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="label-caps h-8 gap-1.5 px-2 text-[10px]"
+              onClick={() => {
+                runCommand(`/timeout ${target.name} 300`);
+                setTarget(null);
+              }}
+            >
+              <Clock className="size-3.5" /> ТАЙМ-АУТ 5М
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="label-caps h-8 gap-1.5 px-2 text-[10px]"
+              onClick={() => {
+                runCommand(`/timeout ${target.name} 3600`);
+                setTarget(null);
+              }}
+            >
+              <Clock className="size-3.5" /> 1Ч
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="label-caps h-8 gap-1.5 px-2 text-[10px]"
+              onClick={() => {
+                runCommand(`/ban ${target.name}`);
+                setTarget(null);
+              }}
+            >
+              <Ban className="size-3.5" /> БАН
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="ml-auto h-8 px-2 text-[10px] text-muted-foreground"
+              onClick={() => setTarget(null)}
+              aria-label="Закрыть панель модерации"
+            >
+              ✕
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Подсказка команд */}
+      {showCommandHint && (
+        <div className="label-caps shrink-0 border-t border-border bg-secondary/30 px-3 py-1.5 text-[10px] text-muted-foreground">
+          КОМАНДЫ: !UPTIME · !TITLE · !КОМАНДЫ · !ЭМОЦИИ
+          {isMod && " · /BAN · /TIMEOUT · /CLEAR · /SLOW · /SO"}
+          {isOwner && " · /MOD · /DEMO"}
+        </div>
+      )}
 
       {/* Ввод */}
       <footer className="shrink-0 border-t border-border p-2.5 pb-[max(env(safe-area-inset-bottom),0.625rem)]">
         {!user ? (
           <Button
             variant="secondary"
-            className="w-full gap-2"
+            className="label-caps w-full gap-2 text-[12px]"
             onClick={() => setAuthOpen(true)}
           >
             <Lock className="size-4" />
-            Войдите, чтобы участвовать
+            ВОЙДИТЕ, ЧТОБЫ УЧАСТВОВАТЬ
           </Button>
         ) : !canSend ? (
-          <div className="flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-xs text-muted-foreground">
+          <div className="label-caps flex items-center gap-2 rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-[11px] text-muted-foreground">
             <Crown className="size-4 shrink-0 text-primary" />
-            Чат доступен только платным подписчикам
+            ЧАТ ДОСТУПЕН ТОЛЬКО ПЛАТНЫМ ПОДПИСЧИКАМ
           </div>
         ) : (
           <form
-            className="flex gap-2"
+            className="flex items-center gap-1.5"
             onSubmit={(e) => {
               e.preventDefault();
               send();
             }}
           >
-            <Input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value.slice(0, 500))}
-              placeholder="Написать сообщение…"
-              aria-label="Сообщение в чат"
-              maxLength={500}
-              className="border-border bg-[#1a1a21] focus-visible:ring-primary/60"
-            />
+            <div className="relative min-w-0 flex-1">
+              <Input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value.slice(0, 500))}
+                placeholder="НАПИСАТЬ СООБЩЕНИЕ…"
+                aria-label="Сообщение в чат"
+                maxLength={500}
+                className="label-caps border-border bg-[#1a1a21] pr-9 text-[12px] placeholder:text-muted-foreground/50 focus-visible:ring-primary/60"
+              />
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Эмодзи"
+                    className="absolute right-1.5 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+                  >
+                    <SmilePlus className="size-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="end" side="top" className="w-auto border-border bg-popover p-2">
+                  <EmotePicker emotes={emotes} onPick={insertEmote} />
+                </PopoverContent>
+              </Popover>
+            </div>
             <Button type="submit" size="icon" aria-label="Отправить" disabled={!draft.trim()}>
-              <Send className="size-4" />
+              <Zap className="size-4" />
             </Button>
           </form>
         )}

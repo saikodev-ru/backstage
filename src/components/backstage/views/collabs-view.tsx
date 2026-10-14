@@ -27,12 +27,12 @@ export function CollabsView() {
       <header className="fade-up flex flex-wrap items-center gap-3">
         <Users2 className="size-6 text-primary" />
         <div>
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Коллаборации</h1>
+          <h1 className="headline text-xl sm:text-2xl">Коллаборации</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Совместные эфиры авторов платформы
+            Совместные эфиры с гостями канала
           </p>
         </div>
-        <div className="ml-auto hidden items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-xs text-accent-foreground sm:flex">
+        <div className="label-caps ml-auto hidden items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-[11px] text-accent-foreground sm:flex">
           <GitBranch className="size-3.5 text-primary" />
           Несколько авторов — один эфир
         </div>
@@ -62,7 +62,7 @@ export function CollabsView() {
                 <div className="flex items-start gap-3">
                   <Sparkles className="mt-0.5 size-5 shrink-0 text-primary" />
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-base font-bold leading-snug sm:text-lg">{collab.title}</h2>
+                    <h2 className="card-title text-base leading-snug sm:text-lg">{collab.title}</h2>
                     {collab.description && (
                       <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                         {collab.description}

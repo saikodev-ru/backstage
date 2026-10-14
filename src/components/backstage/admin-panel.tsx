@@ -1,9 +1,9 @@
 "use client";
 
-// Панель администратора: управление каналами и эфирами (несколько авторов).
+// Панель владельца: управление эфиром dypaGPT, OBS-интеграция, модерация чата.
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Plus, Radio, RefreshCcw, Save } from "lucide-react";
+import { KeyRound, MonitorPlay, Plus, Radio, RefreshCcw, Save, Sword, Ban as BanIcon, Copy } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,9 @@ import { useBackstageStore } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { PublicChannel } from "@/lib/types";
+
+type BanRow = { uid: string; name: string; reason: string; until: number };
+type ModRow = { uid: string; name: string };
 
 type Draft = {
   name: string;
@@ -50,6 +53,50 @@ export function AdminPanel() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState("");
+
+  // ── Модерация и OBS (REST чат-сервиса) ─────────────────────
+  const [bans, setBans] = useState<BanRow[]>([]);
+  const [mods, setMods] = useState<ModRow[]>([]);
+  const [demoChat, setDemoChat] = useState<boolean | null>(null);
+
+  const chatSend = useCallback(async (text: string) => {
+    try {
+      const tr = await fetch("/api/chat/token", { cache: "no-store" });
+      if (!tr.ok) throw new Error("нет токена");
+      const { token } = (await tr.json()) as { token: string };
+      const res = await fetch(`/api/send?XTransformPort=3003`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ channelSlug: selected ?? "dypagpt", text }),
+      });
+      const d = (await res.json()) as { ok: boolean; error?: string; command?: boolean };
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "ошибка");
+      return true;
+    } catch (e) {
+      toast({ title: "Команда не выполнена", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+      return false;
+    }
+  }, [selected]);
+
+  const refreshModeration = useCallback(async () => {
+    const slug = selected ?? "dypagpt";
+    try {
+      const [b, m, s] = await Promise.all([
+        fetch(`/api/bans?XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ bans?: BanRow[] }>),
+        fetch(`/api/mods?channel=${encodeURIComponent(slug)}&XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ mods?: ModRow[] }>),
+        fetch(`/api/chstate?channel=${encodeURIComponent(slug)}&XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ demo?: boolean }>),
+      ]);
+      setBans(b.bans ?? []);
+      setMods(m.mods ?? []);
+      setDemoChat(Boolean(s.demo));
+    } catch {
+      /* чат-сервис недоступен */
+    }
+  }, [selected]);
+
+  useEffect(() => {
+    if (adminOpen) void refreshModeration();
+  }, [adminOpen, refreshModeration]);
 
   useEffect(() => {
     if (channels.length > 0) {
@@ -157,12 +204,12 @@ export function AdminPanel() {
     <Dialog open={adminOpen} onOpenChange={setAdminOpen}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto border-border bg-card">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
+          <DialogTitle className="headline flex items-center gap-2 text-base">
             <Radio className="size-5 text-primary" />
-            Панель управления эфирами
+            ПУЛЬТ ЭФИРА
           </DialogTitle>
           <DialogDescription>
-            Несколько авторов — несколько каналов. Управляйте эфирами и ингрестом RTMP.
+            Управление каналом dypaGPT, OBS-интеграцией и модерацией чата.
           </DialogDescription>
         </DialogHeader>
 
@@ -275,9 +322,157 @@ export function AdminPanel() {
               </div>
             </div>
 
-            <Button onClick={() => void save()} disabled={saving} className="w-full gap-2">
+            {/* OBS-интеграция */}
+            {current && (
+              <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+                <div className="label-caps flex items-center gap-2 text-sm">
+                  <MonitorPlay className="size-4 text-primary" />
+                  ИНТЕГРАЦИЯ С OBS
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="label-caps text-[11px] text-muted-foreground">
+                    ЧАТ-ОВЕРЛЕЙ ДЛЯ BROWSER SOURCE
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/overlay?channel=${current.slug}&XTransformPort=3003`}
+                      aria-label="URL оверлея чата"
+                      className="bg-[#1a1a21] font-mono text-xs"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() =>
+                        void navigator.clipboard
+                          .writeText(`${window.location.origin}/overlay?channel=${current.slug}&XTransformPort=3003`)
+                          .then(() => toast({ title: "URL оверлея скопирован", description: "Вставьте в OBS → Источники → Браузер" }))
+                          .catch(() => toast({ title: "Не удалось скопировать", variant: "destructive" }))
+                      }
+                    >
+                      <Copy className="size-4" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Прозрачный чат с эмодзи 7TV/BTTV/FFZ, бейджами и авто-скроллом. Параметр
+                    <code className="mx-1 rounded bg-black/30 px-1 font-mono text-[10px]">&scale=1.5</code>
+                    увеличит размер текста.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="label-caps text-[11px] text-muted-foreground">HTTP API ЧАТА (ДЛЯ БОТОВ И ВИДЖЕТОВ)</Label>
+                  <pre className="max-h-44 overflow-auto rounded-md bg-black/40 p-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+{`GET  /api/messages?channel=${current.slug}&limit=50&XTransformPort=3003
+POST /api/send  { "channelSlug": "${current.slug}", "text": "…" }
+     + Authorization: Bearer <токен из /api/chat/token>
+GET  /api/emotes?XTransformPort=3003
+GET  /api/chstate?channel=${current.slug}&XTransformPort=3003`}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Модерация */}
+            <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+              <div className="flex items-center gap-2">
+                <Sword className="size-4 text-primary" />
+                <span className="label-caps text-sm">МОДЕРАЦИЯ ЧАТА</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="label-caps ml-auto h-7 gap-1 px-2 text-[10px] text-muted-foreground"
+                  onClick={() => void refreshModeration()}
+                >
+                  <RefreshCcw className="size-3.5" /> ОБНОВИТЬ
+                </Button>
+              </div>
+
+              {/* Демо-чат */}
+              {demoChat !== null && (
+                <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                  <Switch
+                    id="demo-chat-toggle"
+                    checked={demoChat}
+                    onCheckedChange={(v) => {
+                      setDemoChat(v);
+                      void chatSend(`/demo ${v ? "on" : "off"}`).then((ok) => {
+                        if (ok) toast({ title: v ? "Демо-чат включён" : "Демо-чат выключен" });
+                      });
+                    }}
+                    aria-label="Демо-чат"
+                  />
+                  <Label htmlFor="demo-chat-toggle" className="cursor-pointer text-xs leading-snug">
+                    ДЕМО-ЧАТ <span className="font-normal text-muted-foreground">(фейковые зрители оживляют витрину)</span>
+                  </Label>
+                </div>
+              )}
+
+              {/* Моды */}
+              <div>
+                <p className="label-caps mb-1.5 text-[11px] text-muted-foreground">
+                  МОДЕРАТОРЫ ({mods.length})
+                </p>
+                <div className="max-h-28 space-y-1 overflow-y-auto">
+                  {mods.length === 0 && (
+                    <p className="text-xs text-muted-foreground/70">
+                      Пока никого. Назначить: <code className="rounded bg-black/30 px-1 font-mono text-[10px]">/mod имя</code> в чате
+                    </p>
+                  )}
+                  {mods.map((m) => (
+                    <div key={m.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+                      <Sword className="size-3.5 text-[#5ad1a4]" />
+                      <span className="font-semibold">{m.name}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          void chatSend(`/unmod ${m.name}`).then((ok) => ok && refreshModeration());
+                        }}
+                      >
+                        СНЯТЬ
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Баны */}
+              <div>
+                <p className="label-caps mb-1.5 text-[11px] text-muted-foreground">
+                  АКТИВНЫЕ БАНЫ ({bans.length})
+                </p>
+                <div className="max-h-28 space-y-1 overflow-y-auto">
+                  {bans.length === 0 && (
+                    <p className="text-xs text-muted-foreground/70">Банов нет — чат в мире и гармонии</p>
+                  )}
+                  {bans.map((b) => (
+                    <div key={b.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+                      <BanIcon className="size-3.5 text-destructive" />
+                      <span className="font-semibold">{b.name}</span>
+                      <span className="text-muted-foreground">
+                        {b.until === 0 ? "навсегда" : `до ${new Date(b.until).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-primary"
+                        onClick={() => {
+                          void chatSend(`/unban ${b.name}`).then((ok) => ok && refreshModeration());
+                        }}
+                      >
+                        РАЗБАН
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={() => void save()} disabled={saving} className="label-caps w-full gap-2">
               <Save className="size-4" />
-              {saving ? "Сохраняем…" : "Сохранить канал"}
+              {saving ? "СОХРАНЯЕМ…" : "СОХРАНИТЬ КАНАЛ"}
             </Button>
           </div>
         ) : (

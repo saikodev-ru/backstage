@@ -1,9 +1,9 @@
 "use client";
 
-// Главная «Бэкстейдж» — витрина в стиле Twitch: герой эфира, живые каналы,
-// клипы, записи и расписание (заглушки-витрины для будущего контента).
+// Главная «Бэкстейдж» — витрина dypaGPT в стиле Twitch:
+// герой эфира, клипы, записи и расписание. Толстая типографика, UPPERCASE.
 
-import { Clapperboard, Radio, Sparkles, Video, Calendar, ArrowRight, Clapperboard as ClapperIcon } from "lucide-react";
+import { Clapperboard, Radio, Sparkles, Video, Calendar, ArrowRight, Sparkles as SparklesIcon, Gamepad2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBackstageStore } from "@/components/backstage/store";
@@ -11,7 +11,6 @@ import { useContent } from "@/components/backstage/hooks";
 import {
   ClipCard,
   LiveChannelCard,
-  OfflineChannelCard,
   RecordingCard,
   ScheduleRow,
 } from "@/components/backstage/cards";
@@ -30,11 +29,16 @@ function Section({
 }) {
   return (
     <section aria-label={title} className="fade-up">
-      <header className="mb-3 flex items-center gap-2.5">
+      <header className="mb-3.5 flex items-center gap-2.5">
         <Icon className="size-5 text-primary" />
-        <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+        <h2 className="headline text-base sm:text-lg">{title}</h2>
         {action && (
-          <Button variant="ghost" size="sm" className="ml-auto gap-1 text-muted-foreground" onClick={action.onClick}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="label-caps ml-auto gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={action.onClick}
+          >
             {action.label}
             <ArrowRight className="size-4" />
           </Button>
@@ -52,19 +56,19 @@ export function HomeView() {
   const schedule = useContent<ScheduleDto>("schedule");
 
   const liveChannels = channels.filter((c) => c.isLive);
-  const offlineChannels = channels.filter((c) => !c.isLive);
   const hero = liveChannels[0];
+  const main = hero ?? channels[0];
   const bySlug = (slug: string) => channels.find((c) => c.slug === slug);
 
   return (
-    <div className="space-y-8 px-3 py-4 sm:px-5 sm:py-6 lg:px-6">
-      {/* Герой: текущий эфир */}
+    <div className="space-y-9 px-3 py-4 sm:px-5 sm:py-6 lg:px-6">
+      {/* Герой: текущий эфир dypaGPT */}
       {hero ? (
         <section aria-label="Сейчас в эфире" className="fade-up">
-          <header className="mb-3 flex items-center gap-2.5">
+          <header className="mb-3.5 flex items-center gap-2.5">
             <Radio className="size-5 text-live" />
-            <h2 className="text-lg font-bold tracking-tight">Сейчас в эфире</h2>
-            <span className="rounded-full bg-live/15 px-2 py-0.5 text-xs font-semibold text-[#ff6b6b]">
+            <h2 className="headline text-base sm:text-lg">Сейчас в эфире</h2>
+            <span className="label-caps rounded-full bg-live/15 px-2 py-0.5 text-[11px] text-[#ff6b6b]">
               {liveChannels.length > 1 ? `${liveChannels.length} канала` : "1 канал"}
             </span>
           </header>
@@ -83,18 +87,18 @@ export function HomeView() {
         <section className="fade-up rounded-xl border border-border bg-gradient-to-br from-accent/40 via-card to-card p-6 sm:p-8">
           <div className="flex items-center gap-2.5">
             <Sparkles className="size-5 text-primary" />
-            <h2 className="text-lg font-bold">Сейчас все авторы отдыхают</h2>
+            <h2 className="headline text-base sm:text-lg">dypaGPT сейчас отдыхает</h2>
           </div>
           <p className="mt-2 max-w-lg text-sm leading-relaxed text-muted-foreground">
-            Эфиров нет, но витрина уже живёт: каналы, расписание и архив на месте.
-            Подпишитесь на уведомления, чтобы не пропустить старт.
+            Эфира нет, но витрина живёт: расписание, клипы и архив на месте.
+            Подписка на уведомления — и вы не пропустите старт.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => setView("schedule")}>
+            <Button className="label-caps gap-2" onClick={() => setView("schedule")}>
               <Calendar className="size-4" />
-              Смотреть расписание
+              Расписание
             </Button>
-            <Button variant="secondary" onClick={() => setView("recordings")}>
+            <Button variant="secondary" className="label-caps gap-2" onClick={() => setView("recordings")}>
               <Video className="size-4" />
               Записи эфиров
             </Button>
@@ -102,12 +106,12 @@ export function HomeView() {
         </section>
       )}
 
-      {/* Каналы платформы */}
-      {offlineChannels.length > 0 && (
-        <Section icon={Radio} title="Каналы Бэкстейджа">
+      {/* Полоса «что на канале» — карточка-визитка dypaGPT */}
+      {main && !hero && (
+        <Section icon={SparklesIcon} title="Канал платформы">
           <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {offlineChannels.map((c) => (
-              <OfflineChannelCard key={c.slug} channel={c} />
+            {channels.map((c) => (
+              <LiveChannelCard key={c.slug} channel={c} />
             ))}
           </div>
         </Section>
@@ -117,7 +121,7 @@ export function HomeView() {
       <Section
         icon={Clapperboard}
         title="Популярные клипы"
-        action={{ label: "Все клипы", onClick: () => setView("clips") }}
+        action={{ label: "ВСЕ КЛИПЫ", onClick: () => setView("clips") }}
       >
         <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {clips === null
@@ -138,7 +142,7 @@ export function HomeView() {
       <Section
         icon={Video}
         title="Записи эфиров"
-        action={{ label: "Все записи", onClick: () => setView("recordings") }}
+        action={{ label: "ВСЕ ЗАПИСИ", onClick: () => setView("recordings") }}
       >
         <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {recordings === null
@@ -159,7 +163,7 @@ export function HomeView() {
       <Section
         icon={Calendar}
         title="Ближайшие эфиры"
-        action={{ label: "Всё расписание", onClick: () => setView("schedule") }}
+        action={{ label: "ВСЁ РАСПИСАНИЕ", onClick: () => setView("schedule") }}
       >
         <div className="space-y-2.5">
           {schedule === null
@@ -173,10 +177,13 @@ export function HomeView() {
       {/* Футер-подпись главной */}
       <footer className="border-t border-border pt-5 text-xs leading-relaxed text-muted-foreground/60">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <ClapperIcon className="size-4" aria-hidden />
-          <span>Бэкстейдж — приватные трансляции для платных подписчиков.</span>
-          <button className="underline-offset-2 hover:text-primary hover:underline" onClick={() => channels[0] && openChannel(channels[0].slug)}>
-            Перейти к каналу
+          <Gamepad2 className="size-4" aria-hidden />
+          <span className="label-caps text-[10px]">BACKSTAGE — приватные трансляции для платных подписчиков.</span>
+          <button
+            className="label-caps text-[10px] underline-offset-2 hover:text-primary hover:underline"
+            onClick={() => channels[0] && openChannel(channels[0].slug)}
+          >
+            ПЕРЕЙТИ К ЭФИРУ
           </button>
         </div>
       </footer>

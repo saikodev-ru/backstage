@@ -20,7 +20,8 @@ export function toPublicUser(u: {
   subCheckedAt: Date | null;
   authProvider: string;
 }): PublicUser {
-  const role: Role = u.role === "ADMIN" || u.role === "STREAMER" ? u.role : "VIEWER";
+  const role: Role =
+    u.role === "ADMIN" || u.role === "STREAMER" || u.role === "MOD" ? u.role : "VIEWER";
   return {
     id: u.id,
     telegramId: u.telegramId,

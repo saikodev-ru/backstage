@@ -169,7 +169,7 @@ export function LiveView() {
                       {channel.name.slice(0, 1).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <h2 className="mt-3 text-lg font-bold">{channel.name} сейчас офлайн</h2>
+                  <h2 className="headline mt-3 text-lg">{channel.name} СЕЙЧАС ОФЛАЙН</h2>
                   {nextStream ? (
                     <p className="mt-1 text-sm text-muted-foreground">
                       Следующий эфир: <span className="font-semibold text-foreground">{nextStream.title}</span>
@@ -184,12 +184,12 @@ export function LiveView() {
                     <p className="mt-1 text-sm text-muted-foreground">Расписание уточняется</p>
                   )}
                   <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    <Button variant="secondary" onClick={() => setView("schedule")}>
+                    <Button variant="secondary" className="label-caps gap-2 text-[12px]" onClick={() => setView("schedule")}>
                       <Bell className="size-4" />
-                      Напомнить об эфире
+                      НАПОМНИТЬ ОБ ЭФИРЕ
                     </Button>
-                    <Button variant="ghost" onClick={() => setView("recordings")}>
-                      Записи эфиров
+                    <Button variant="ghost" className="label-caps text-[12px]" onClick={() => setView("recordings")}>
+                      ЗАПИСИ ЭФИРОВ
                     </Button>
                   </div>
                 </div>
@@ -218,11 +218,11 @@ export function LiveView() {
 
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-base font-bold sm:text-lg">{channel.name}</h1>
+                <h1 className="headline text-base sm:text-lg">{channel.name}</h1>
                 {channel.isLive && (
-                  <span className="flex items-center gap-1.5 rounded-sm bg-live px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                  <span className="label-caps flex items-center gap-1.5 rounded-sm bg-live px-1.5 py-0.5 text-[10px] text-white">
                     <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
-                    Live
+                    LIVE
                   </span>
                 )}
                 {user?.isSubscriber && channel.isLive && (
@@ -233,7 +233,7 @@ export function LiveView() {
               </div>
               {channel.isLive ? (
                 <>
-                  <p className="mt-1 text-sm font-medium sm:text-base">{channel.liveTitle}</p>
+                  <p className="card-title mt-1 text-sm sm:text-base">{channel.liveTitle}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {channel.liveCategory && (
                       <span className="font-medium text-primary/90 hover:underline cursor-pointer">
@@ -263,11 +263,11 @@ export function LiveView() {
               <Button
                 variant={followed ? "secondary" : "default"}
                 onClick={toggle}
-                className={cn("gap-2", followed && "text-primary")}
+                className={cn("label-caps gap-2 text-[12px]", followed && "text-primary")}
                 aria-pressed={followed}
               >
                 <Heart className={cn("size-4", followed && "fill-primary")} />
-                {followed ? "Вы подписаны" : "Подписаться"}
+                {followed ? "ВЫ ПОДПИСАНЫ" : "ПОДПИСАТЬСЯ"}
                 {!followed && (
                   <span className="ml-1 hidden text-xs opacity-70 sm:inline">
                     {formatCount(channel.followers)}
@@ -284,8 +284,8 @@ export function LiveView() {
         {/* Записи канала (мобайл: под чатом, десктоп: ниже инфо) */}
         {channelRecordings.length > 0 && (
           <div className="px-2 pb-6 pt-2 sm:px-4 xl:hidden">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Записи эфира
+            <h2 className="label-caps mb-3 text-[12px] text-muted-foreground">
+              ЗАПИСИ ЭФИРА
             </h2>
             <div className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
               {channelRecordings.map((r) => (
@@ -306,10 +306,10 @@ export function LiveView() {
         <button
           onClick={() => setChatOpen((v) => !v)}
           aria-expanded={chatOpen}
-          className="flex w-full items-center gap-2 px-4 py-2.5 text-sm font-semibold"
+          className="label-caps flex w-full items-center gap-2 px-4 py-2.5 text-[12px]"
         >
           <Users className="size-4 text-primary" aria-hidden />
-          Чат трансляции
+          ЧАТ ЭФИРА
           {channel.isLive && (
             <span className="ml-1 rounded-sm bg-live/15 px-1.5 py-px text-[11px] font-bold text-[#ff6b6b]">
               {formatCount(Math.max(channel.viewers, 1))} зрителей

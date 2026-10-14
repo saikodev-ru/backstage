@@ -19,6 +19,9 @@ export const ADMIN_IDS = (process.env.ADMIN_IDS ?? "")
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
 
+// Разрешить демо-вход даже при настроенном боте (только для разработки!)
+export const DEMO_LOGIN = process.env.DEMO_LOGIN === "1";
+
 export const botConfigured = Boolean(BOT_TOKEN && BOT_USERNAME);
 export const subscriptionCheckConfigured = Boolean(BOT_TOKEN && TELEGRAM_CHAT_ID);
 

@@ -21,13 +21,13 @@ export function ClipsView() {
       <header className="fade-up flex flex-wrap items-center gap-3">
         <Clapperboard className="size-6 text-primary" />
         <div>
-          <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Клипы</h1>
+          <h1 className="headline text-xl sm:text-2xl">Клипы</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Лучшие моменты эфиров Бэкстейджа
+            Лучшие моменты эфиров dypaGPT
             {clips ? ` · ${formatCount(totalViews)} просмотров` : ""}
           </p>
         </div>
-        <div className="ml-auto hidden items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-xs text-accent-foreground sm:flex">
+        <div className="label-caps ml-auto hidden items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-[11px] text-accent-foreground sm:flex">
           <Sparkles className="size-3.5 text-primary" />
           Витрина-заглушка: плеер клипов подключается к медиа-хранилищу
         </div>

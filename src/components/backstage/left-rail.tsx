@@ -25,11 +25,11 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { id: "live", label: "В ЭФИРЕ", icon: Radio },
-  { id: "home", label: "Главная", icon: Home },
-  { id: "clips", label: "Клипы", icon: Clapperboard },
-  { id: "recordings", label: "Записи", icon: Video },
-  { id: "collabs", label: "Коллаборации", icon: Users },
-  { id: "schedule", label: "Расписание", icon: Calendar },
+  { id: "home", label: "ГЛАВНАЯ", icon: Home },
+  { id: "clips", label: "КЛИПЫ", icon: Clapperboard },
+  { id: "recordings", label: "ЗАПИСИ", icon: Video },
+  { id: "collabs", label: "КОЛЛАБОРАЦИИ", icon: Users },
+  { id: "schedule", label: "РАСПИСАНИЕ", icon: Calendar },
 ];
 
 function useNavActions() {
@@ -74,7 +74,7 @@ export function LeftRail() {
               onClick={() => go(item.id)}
               aria-current={isActive ? "page" : undefined}
               className={cn(
-                "group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                "label-caps group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13px] transition-colors",
                 isActive
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -93,8 +93,8 @@ export function LeftRail() {
         })}
       </div>
 
-      <div className="mt-2 px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-        Каналы
+      <div className="label-caps mt-2 px-4 pb-1 pt-3 text-[11px] text-muted-foreground/70">
+        КАНАЛЫ
       </div>
       <div className="p-2 pt-0">
         {channels.map((c) => {
@@ -142,8 +142,8 @@ export function LeftRail() {
         })}
       </div>
 
-      <div className="mt-auto p-4 text-[11px] leading-relaxed text-muted-foreground/50">
-        Бэкстейдж v0.1 · приватные трансляции
+      <div className="label-caps mt-auto p-4 text-[10px] leading-relaxed text-muted-foreground/50">
+        BACKSTAGE v0.2 · ПРИВАТНЫЕ ТРАНСЛЯЦИИ
       </div>
     </nav>
   );
@@ -179,11 +179,11 @@ export function MobileNav() {
               </span>
               <span
                 className={cn(
-                  "text-[10px] font-medium",
+                  "label-caps text-[9px]",
                   isActive ? "text-primary" : "text-muted-foreground"
                 )}
               >
-                {item.label === "В ЭФИРЕ" ? "Эфир" : item.label}
+                {item.label === "В ЭФИРЕ" ? "ЭФИР" : item.label}
               </span>
             </button>
           );

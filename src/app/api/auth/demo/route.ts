@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, toPublicUser } from "@/lib/auth";
-import { botConfigured } from "@/lib/env";
+import { botConfigured, DEMO_LOGIN } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -10,14 +10,14 @@ export const dynamic = "force-dynamic";
  * Позволяет протестировать весь функционал: роли, гейтинг по подписке.
  */
 export async function POST(req: NextRequest) {
-  if (botConfigured) {
+  if (botConfigured && !DEMO_LOGIN) {
     return NextResponse.json(
       { error: "demo_disabled", message: "Демо-вход отключён: настроен Telegram-бот" },
       { status: 403 }
     );
   }
 
-  let body: { name?: string; subscriber?: boolean; admin?: boolean };
+  let body: { name?: string; subscriber?: boolean; admin?: boolean; mod?: boolean };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   const telegramId = `demo:${name.toLowerCase().replace(/[^a-zа-я0-9]+/gi, "-")}`;
   const isSubscriber = Boolean(body.subscriber);
-  const role = body.admin ? "ADMIN" : "VIEWER";
+  const role = body.admin ? "ADMIN" : body.mod ? "MOD" : "VIEWER";
 
   const user = await db.user.upsert({
     where: { telegramId },
