@@ -1,0 +1,135 @@
+// Backstage (Бэкстейдж) — приватная стриминговая платформа
+// SQLite + Prisma. Списки хранятся как JSON-строки (ограничение SQLite).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Пользователи и сессии ────────────────────────────────────────────────
+
+model User {
+  id           String    @id @default(cuid())
+  // Telegram ID (число как строка) или "demo:<slug>" для демо-режима
+  telegramId   String?   @unique
+  username     String?
+  firstName    String
+  lastName     String?
+  photoUrl     String?
+  // VIEWER | STREAMER | ADMIN (SQLite не поддерживает enum)
+  role         String    @default("VIEWER")
+  // Флаг платной подписки на приватный Telegram-канал
+  isSubscriber Boolean   @default(false)
+  subCheckedAt DateTime?
+  // telegram | demo
+  authProvider String    @default("telegram")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+// ─── Каналы (несколько авторов трансляций) ────────────────────────────────
+
+model Channel {
+  id             String    @id @default(cuid())
+  slug           String    @unique
+  name           String
+  handle         String    @unique
+  tagline        String?
+  description    String?
+  avatarUrl      String?
+  bannerUrl      String?
+  accentColor    String    @default("#a970ff")
+  // Приватный Telegram-канал для проверки подписки (chat id или @username)
+  telegramChatId String?
+  telegramLink   String?
+  // Состояние эфира
+  isLive         Boolean   @default(false)
+  liveTitle      String?
+  liveCategory   String?
+  liveTags       String    @default("[]") // JSON: string[]
+  liveStartedAt  DateTime?
+  // Превью эфира (плакат, пока не подключён медиа-сервер)
+  livePreviewUrl String?
+  hlsUrl         String?
+  streamKey      String    @default(cuid())
+  followers      Int       @default(0)
+  viewers        Int       @default(0)
+  sortOrder      Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+// ─── Чат (архив сообщений, пишет chat-сервис) ─────────────────────────────
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  channelSlug String
+  uid         String?
+  name        String
+  color       String   @default("#9a9aa6")
+  avatar      String?
+  text        String
+  system      Boolean  @default(false)
+  ts          DateTime @default(now())
+
+  @@index([channelSlug, ts])
+}
+
+// ─── Контент: расписание, клипы, записи, коллаборации ─────────────────────
+
+model ScheduleEntry {
+  id          String   @id @default(cuid())
+  channelSlug String
+  title       String
+  category    String?
+  startsAt    DateTime
+  durationMin Int      @default(120)
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+model Clip {
+  id           String   @id @default(cuid())
+  channelSlug  String
+  title        String
+  thumbnailUrl String?
+  durationSec  Int      @default(60)
+  views        Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model Recording {
+  id           String   @id @default(cuid())
+  channelSlug  String
+  title        String
+  thumbnailUrl String?
+  durationSec  Int      @default(3600)
+  views        Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model Collab {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  // JSON: [{ slug, name, avatarUrl, role }]
+  members     String   @default("[]")
+  status      String   @default("idea") // idea | planning | confirmed
+  plannedAt   DateTime?
+  createdAt   DateTime @default(now())
+}
