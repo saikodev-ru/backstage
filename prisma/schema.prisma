@@ -57,6 +57,9 @@ model Channel {
   // Приватный Telegram-канал для проверки подписки (chat id или @username)
   telegramChatId String?
   telegramLink   String?
+  // Привязка к инстансу Owncast (стриминг-движок): один канал = один движок.
+  // Пусто → используется OWNCast_URL из окружения (дефолтный инстанс).
+  owncastBaseUrl String?
   // Состояние эфира
   isLive         Boolean   @default(false)
   liveTitle      String?

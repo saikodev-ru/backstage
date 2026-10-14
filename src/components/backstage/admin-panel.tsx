@@ -3,7 +3,21 @@
 // Панель владельца: управление эфиром dypaGPT, OBS-интеграция, модерация чата.
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, MonitorPlay, Plus, Radio, RefreshCcw, Save, Sword, Ban as BanIcon, Copy } from "lucide-react";
+import {
+  Ban as BanIcon,
+  Copy,
+  KeyRound,
+  Loader2,
+  MonitorPlay,
+  Play,
+  Plus,
+  Radio,
+  RefreshCcw,
+  Save,
+  Server,
+  Square,
+  Sword,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { useBackstageStore } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
@@ -30,9 +43,15 @@ type Draft = {
   liveTitle: string;
   liveCategory: string;
   liveTags: string;
-  hlsUrl: string;
   livePreviewUrl: string;
-  isLive: boolean;
+};
+
+/** Состояние движка Owncast + демо-эфира (GET /api/admin/demo-stream) */
+type EngineState = {
+  running: boolean;
+  engine: { engine: "owncast"; reachable: boolean; online: boolean; version: string; baseUrl: string };
+  rtmp: { url: string; key: string };
+  hls: { url: string };
 };
 
 function draftOf(c: PublicChannel): Draft {
@@ -41,9 +60,7 @@ function draftOf(c: PublicChannel): Draft {
     liveTitle: c.liveTitle ?? "",
     liveCategory: c.liveCategory ?? "",
     liveTags: c.liveTags.join(", "),
-    hlsUrl: c.hlsUrl ?? "",
     livePreviewUrl: c.livePreviewUrl ?? "",
-    isLive: c.isLive,
   };
 }
 
@@ -98,6 +115,67 @@ export function AdminPanel() {
     if (adminOpen) void refreshModeration();
   }, [adminOpen, refreshModeration]);
 
+  // ── Движок Owncast: статус + демо-эфир (ffmpeg → RTMP) ───────────
+  const [engineState, setEngineState] = useState<EngineState | null>(null);
+  const [demoBusy, setDemoBusy] = useState(false);
+
+  const refreshEngine = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/demo-stream", { cache: "no-store" });
+      if (!res.ok) return;
+      setEngineState((await res.json()) as EngineState);
+    } catch {
+      /* движок не отвечает */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!adminOpen) return;
+    void refreshEngine();
+    const t = setInterval(() => void refreshEngine(), 10_000);
+    return () => clearInterval(t);
+  }, [adminOpen, refreshEngine]);
+
+  const toggleDemo = useCallback(
+    async (action: "start" | "stop") => {
+      setDemoBusy(true);
+      try {
+        const res = await fetch("/api/admin/demo-stream", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const d = (await res.json()) as { ok?: boolean; message?: string };
+        if (!res.ok || !d.ok) throw new Error(d.message ?? "Ошибка");
+        toast({
+          title: action === "start" ? "Демо-эфир запущен" : "Демо-эфир остановлен",
+          description:
+            action === "start"
+              ? "ffmpeg пушит RTMP в Owncast — плеер покажет поток через несколько секунд"
+              : "Эфир завершён, витрина перейдёт в оффлайн",
+        });
+        await refreshEngine();
+        // Обновляем каналы сразу: статус эфира меняется
+        const ch = await fetch("/api/channels", { cache: "no-store" }).then(
+          (r) => r.json() as Promise<{ channels?: PublicChannel[] }>
+        );
+        if (ch.channels) setChannels(ch.channels);
+      } catch (e) {
+        toast({ title: "Ошибка демо-эфира", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+      } finally {
+        setDemoBusy(false);
+      }
+    },
+    [refreshEngine, setChannels]
+  );
+
+  const copyText = useCallback((text: string, title: string) => {
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => toast({ title }))
+      .catch(() => toast({ title: "Не удалось скопировать", variant: "destructive" }));
+  }, []);
+
   useEffect(() => {
     if (channels.length > 0) {
       setSelected((prev) => prev ?? channels[0].slug);
@@ -131,11 +209,9 @@ export function AdminPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: draft.name,
-          isLive: draft.isLive,
           liveTitle: draft.liveTitle || null,
           liveCategory: draft.liveCategory || null,
           liveTags: draft.liveTags.split(",").map((t) => t.trim()).filter(Boolean),
-          hlsUrl: draft.hlsUrl || null,
           livePreviewUrl: draft.livePreviewUrl || null,
         }),
       });
@@ -143,10 +219,8 @@ export function AdminPanel() {
       if (!res.ok || !data.channel) throw new Error(data.message ?? data.error ?? "Ошибка сохранения");
       patchChannel(current.slug, data.channel);
       toast({
-        title: data.channel.isLive ? "Эфир запущен" : "Изменения сохранены",
-        description: data.channel.isLive
-          ? `«${data.channel.liveTitle ?? data.channel.name}» — системное сообщение отправлено в чат`
-          : `Канал ${data.channel.name} обновлён`,
+        title: "Изменения сохранены",
+        description: `Канал ${data.channel.name} обновлён`,
       });
     } catch (e) {
       toast({ title: "Ошибка", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
@@ -154,23 +228,6 @@ export function AdminPanel() {
       setSaving(false);
     }
   }, [current, draft, patchChannel]);
-
-  const resetKey = useCallback(async () => {
-    if (!current) return;
-    try {
-      const res = await fetch(`/api/channels/${current.slug}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ resetStreamKey: true }),
-      });
-      const data = (await res.json()) as { channel?: PublicChannel };
-      if (!res.ok || !data.channel) throw new Error();
-      patchChannel(current.slug, data.channel);
-      toast({ title: "Stream key обновлён", description: "Прежний ключ больше не работает" });
-    } catch {
-      toast({ title: "Не удалось обновить ключ", variant: "destructive" });
-    }
-  }, [current, patchChannel]);
 
   const createChannel = useCallback(async () => {
     const name = newName.trim();
@@ -193,11 +250,8 @@ export function AdminPanel() {
   }, [newName, channels, setChannels]);
 
   const copyKey = () => {
-    if (!current?.streamKey) return;
-    void navigator.clipboard
-      .writeText(current.streamKey)
-      .then(() => toast({ title: "Stream key скопирован" }))
-      .catch(() => toast({ title: "Не удалось скопировать", variant: "destructive" }));
+    if (!engineState?.rtmp.key) return;
+    copyText(engineState.rtmp.key, "Stream key скопирован");
   };
 
   return (
@@ -209,7 +263,7 @@ export function AdminPanel() {
             ПУЛЬТ ЭФИРА
           </DialogTitle>
           <DialogDescription>
-            Управление каналом dypaGPT, OBS-интеграцией и модерацией чата.
+            Движок Owncast, OBS-интеграция и модерация чата канала dypaGPT.
           </DialogDescription>
         </DialogHeader>
 
@@ -234,25 +288,99 @@ export function AdminPanel() {
 
         {current && draft ? (
           <div className="space-y-4">
-            {/* Тумблер эфира */}
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-secondary/40 p-3">
-              <Switch
-                id="live-toggle"
-                checked={draft.isLive}
-                onCheckedChange={(v) => setDraft({ isLive: v })}
-                aria-label="Эфир в эфире"
-              />
-              <div className="flex-1">
-                <Label htmlFor="live-toggle" className="cursor-pointer text-sm font-semibold">
-                  {draft.isLive ? "Эфир идёт" : "Эфир выключен"}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  При включении в чат уйдёт системное сообщение о старте
-                </p>
+            {/* Движок Owncast: реальный статус эфира + демо-эфир */}
+            <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-3">
+              <div className="flex items-center gap-2">
+                <Server className="size-4 text-primary" />
+                <span className="label-caps text-sm">СТРИМИНГ-ДВИЖОК · OWNCast</span>
+                {engineState && (
+                  <span
+                    className={cn(
+                      "label-caps ml-auto rounded-full px-2 py-px text-[10px]",
+                      engineState.engine.reachable
+                        ? "bg-[#5ad1a4]/15 text-[#5ad1a4]"
+                        : "bg-destructive/15 text-destructive"
+                    )}
+                  >
+                    {engineState.engine.reachable
+                      ? `ВЕРСИЯ ${engineState.engine.version || "?"}`
+                      : "НЕДОСТУПЕН"}
+                  </span>
+                )}
               </div>
-              <Button variant="secondary" size="sm" onClick={() => openChannel(current.slug)}>
-                Открыть канал
-              </Button>
+
+              {engineState ? (
+                engineState.engine.reachable ? (
+                  <>
+                    <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                      {engineState.engine.online ? (
+                        <span className="live-breathe label-caps flex items-center gap-1.5 rounded-full bg-live px-2 py-px text-[11px] text-white">
+                          <span className="size-1.5 rounded-full bg-white live-dot" aria-hidden />
+                          ЭФИР ИДЁТ
+                        </span>
+                      ) : (
+                        <span className="label-caps rounded-full bg-secondary px-2 py-px text-[11px] text-muted-foreground">
+                          ОФЛАЙН
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground">
+                        Статус приходит из движка: эфир = RTMP-пуш из OBS
+                      </span>
+                    </div>
+
+                    {/* Демо-эфир */}
+                    <div className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2">
+                      <Button
+                        variant={engineState.running ? "destructive" : "default"}
+                        size="sm"
+                        disabled={demoBusy}
+                        onClick={() => void toggleDemo(engineState.running ? "stop" : "start")}
+                        className="label-caps gap-2"
+                      >
+                        {demoBusy ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : engineState.running ? (
+                          <Square className="size-4" />
+                        ) : (
+                          <Play className="size-4" />
+                        )}
+                        {engineState.running ? "ОСТАНОВИТЬ ДЕМО-ЭФИР" : "ДЕМО-ЭФИР (FFMPEG)"}
+                      </Button>
+                      <p className="text-xs leading-snug text-muted-foreground">
+                        ffmpeg пушит тестовый поток в RTMP — проверка всего конвейера без OBS
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-muted-foreground">
+                    Owncast не отвечает по адресу <code className="font-mono">{engineState.engine.baseUrl}</code>.
+                    Запустите движок: <code className="font-mono">cd mini-services/owncast && bun run dev</code>
+                  </p>
+                )
+              ) : (
+                <p className="text-xs text-muted-foreground">Проверяем движок…</p>
+              )}
+
+              {/* RTMP для OBS */}
+              <div className="space-y-1.5">
+                <Label className="label-caps text-[11px] text-muted-foreground">RTMP-СЕРВЕР ДЛЯ OBS</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={engineState?.rtmp.url ?? ""}
+                    aria-label="RTMP-сервер"
+                    className="bg-[#1a1a21] font-mono text-xs"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => engineState && copyText(engineState.rtmp.url, "RTMP-адрес скопирован")}
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -273,17 +401,6 @@ export function AdminPanel() {
                 <Input id="a-tags" value={draft.liveTags} onChange={(e) => setDraft({ liveTags: e.target.value })} placeholder="код, музыка" className="bg-[#1a1a21]" />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="a-hls">HLS-адрес потока (M3U8)</Label>
-                <Textarea
-                  id="a-hls"
-                  value={draft.hlsUrl}
-                  onChange={(e) => setDraft({ hlsUrl: e.target.value })}
-                  placeholder="https://media.example.com/live/saiko.m3u8"
-                  rows={2}
-                  className="resize-none bg-[#1a1a21] font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="a-preview">Превью эфира (URL изображения)</Label>
                 <Input
                   id="a-preview"
@@ -295,29 +412,27 @@ export function AdminPanel() {
               </div>
             </div>
 
-            {/* Stream key */}
+            {/* Стрим-ключ Owncast */}
             <div className="rounded-lg border border-border bg-secondary/40 p-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <KeyRound className="size-4 text-primary" />
-                Ключ вещания (RTMP)
+                Стрим-ключ Owncast
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Сервер: <code className="rounded bg-black/30 px-1 py-px font-mono">rtmp://media.backstage.live/live</code>
-                {" · "}не передавайте ключ третьим лицам
+                Вставьте в OBS: Настройки → Вещание → Ключ потока · не передавайте ключ третьим лицам
               </p>
               <div className="mt-2 flex gap-2">
                 <Input
                   readOnly
-                  value={current.streamKey ?? "—"}
+                  value={engineState?.rtmp.key ?? "…"}
                   aria-label="Stream key"
                   className="bg-[#1a1a21] font-mono text-xs"
                 />
                 <Button variant="secondary" size="sm" onClick={copyKey}>
                   Копировать
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => void resetKey()}>
-                  <RefreshCcw className="size-4" />
-                  Сбросить
+                <Button variant="secondary" size="sm" onClick={() => openChannel(current.slug)}>
+                  Открыть канал
                 </Button>
               </div>
             </div>
@@ -428,7 +543,9 @@ GET  /api/chstate?channel=${current.slug}&XTransformPort=3003`}
                         size="sm"
                         className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
                         onClick={() => {
-                          void chatSend(`/unmod ${m.name}`).then((ok) => ok && refreshModeration());
+                          void chatSend(`/unmod ${m.name}`).then((ok) => {
+                            if (ok) void refreshModeration();
+                          });
                         }}
                       >
                         СНЯТЬ
@@ -459,7 +576,9 @@ GET  /api/chstate?channel=${current.slug}&XTransformPort=3003`}
                         size="sm"
                         className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-primary"
                         onClick={() => {
-                          void chatSend(`/unban ${b.name}`).then((ok) => ok && refreshModeration());
+                          void chatSend(`/unban ${b.name}`).then((ok) => {
+                            if (ok) void refreshModeration();
+                          });
                         }}
                       >
                         РАЗБАН

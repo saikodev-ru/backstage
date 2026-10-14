@@ -36,6 +36,8 @@ export type PublicChannel = {
   liveStartedAt: string | null;
   livePreviewUrl: string | null;
   hlsUrl: string | null;
+  // Привязка канала к инстансу Owncast (мультиканал: один канал = один движок)
+  owncastBaseUrl?: string | null;
   followers: number;
   viewers: number;
   sortOrder: number;

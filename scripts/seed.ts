@@ -6,7 +6,7 @@ import { PrismaClient } from "@prisma/client";
 
 const db = new PrismaClient();
 
-const MUX_TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
+const MUX_TEST_STREAM = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"; // legacy: использовался до перехода на Owncast
 
 function at(dayOffset: number, hour: number, minute = 0): Date {
   const d = new Date();
@@ -35,13 +35,14 @@ async function main() {
     accentColor: "#a970ff",
     telegramChatId: process.env.TELEGRAM_CHAT_ID ?? "",
     telegramLink: process.env.TELEGRAM_CHANNEL_LINK ?? "https://t.me/dypaGPT",
-    isLive: true,
+    isLive: false, // реальный статус приходит от движка Owncast (RTMP-пуш)
     liveTitle: "ХОРРОР-МАРАФОН #17: до последнего скримера 😱",
     liveCategory: "VTuber · Хорроры",
     liveTags: JSON.stringify(["vtuber", "хоррор", "нейро-девочка", "караоке после"]),
-    liveStartedAt: new Date(Date.now() - 63 * 60 * 1000),
+    liveStartedAt: null,
     livePreviewUrl: "/img/dypagpt/live.png",
-    hlsUrl: MUX_TEST_STREAM,
+    hlsUrl: null, // HLS отдаётся через прокси /api/stream/hls/stream.m3u8
+    owncastBaseUrl: null, // привязан к дефолтному инстансу Owncast (OWNCAST_URL)
     followers: 24813,
     viewers: 0,
     sortOrder: 0,

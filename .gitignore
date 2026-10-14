@@ -64,3 +64,8 @@ server.log
 !.env.example
 /Caddyfile
 /worklog.md
+
+# Owncast: бинарь и рантайм-данные не в репо (см. scripts/fetch-owncast.ts)
+/mini-services/owncast/owncast
+/mini-services/owncast/data/
+/mini-services/owncast/owncast-run.log

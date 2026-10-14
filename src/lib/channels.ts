@@ -23,6 +23,7 @@ type ChannelRow = {
   liveStartedAt: Date | null;
   livePreviewUrl: string | null;
   hlsUrl: string | null;
+  owncastBaseUrl: string | null;
   streamKey: string;
   followers: number;
   viewers: number;
@@ -57,6 +58,7 @@ export function mapChannel(c: ChannelRow, isAdmin: boolean): PublicChannel {
     liveStartedAt: c.liveStartedAt ? c.liveStartedAt.toISOString() : null,
     livePreviewUrl: c.livePreviewUrl,
     hlsUrl: c.hlsUrl,
+    owncastBaseUrl: c.owncastBaseUrl,
     followers: c.followers,
     viewers: c.viewers,
     sortOrder: c.sortOrder,

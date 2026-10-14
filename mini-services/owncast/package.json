@@ -1,0 +1,10 @@
+{
+  "name": "backstage-owncast",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Owncast 0.3.0 — стриминг-движок BACKSTAGE (RTMP-инжест + HLS + статус-API). Порт 8080, RTMP 1935.",
+  "scripts": {
+    "dev": "bun --hot run.ts",
+    "start": "bun run.ts"
+  }
+}

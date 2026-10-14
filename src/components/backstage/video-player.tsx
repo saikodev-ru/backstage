@@ -100,6 +100,11 @@ export function VideoPlayer({
         hls.on(HlsCtor.Events.LEVEL_SWITCHED, (_e, data) => {
           setCurrentQuality(hls.autoLevelEnabled ? -1 : data.level);
         });
+        hls.on(HlsCtor.Events.LEVEL_LOADED, (_e, data) => {
+          // Живой ли плейлист: у hls.js длительность окна конечна (~9с),
+          // поэтому статус LIVE берём из манифеста
+          setIsLive(Boolean(data.details?.live));
+        });
         hls.on(HlsCtor.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
           if (data.type === HlsCtor.ErrorTypes.NETWORK_ERROR) {
@@ -137,8 +142,8 @@ export function VideoPlayer({
       setVolume(video.volume);
     };
     const onDuration = () => {
-      const live = !Number.isFinite(video.duration) || video.duration === 0;
-      setIsLive(live && !Number.isFinite(video.duration));
+      // нативный live (Safari): длительность бесконечна
+      if (!Number.isFinite(video.duration)) setIsLive(true);
     };
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);

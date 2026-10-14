@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { mapChannel } from "@/lib/channels";
 import { getSessionUser, toPublicUser } from "@/lib/auth";
+import { mergeChannelsWithOwncast } from "@/lib/owncast";
 import { BackstageApp } from "@/components/backstage/backstage-app";
 
 export const dynamic = "force-dynamic";
@@ -12,10 +13,11 @@ export default async function Page() {
   ]);
 
   const isAdmin = user?.role === "ADMIN";
+  const merged = await mergeChannelsWithOwncast(channels.map((c) => mapChannel(c, isAdmin)));
 
   return (
     <BackstageApp
-      initialChannels={channels.map((c) => mapChannel(c, isAdmin))}
+      initialChannels={merged}
       initialUser={user ? toPublicUser(user) : null}
     />
   );

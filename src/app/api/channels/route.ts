@@ -2,15 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { mapChannel } from "@/lib/channels";
+import { mergeChannelsWithOwncast } from "@/lib/owncast";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/channels — список каналов (админам — с streamKey) */
+/** GET /api/channels — список каналов с реальным состоянием Owncast (эфир/зрители/HLS) */
 export async function GET() {
   const user = await getSessionUser();
   const isAdmin = user?.role === "ADMIN";
   const channels = await db.channel.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] });
-  return NextResponse.json({ channels: channels.map((c) => mapChannel(c, isAdmin)) });
+  const merged = await mergeChannelsWithOwncast(channels.map((c) => mapChannel(c, isAdmin)));
+  return NextResponse.json({ channels: merged });
 }
 
 /** POST /api/channels — создание канала (только админ): поддержка нескольких авторов */

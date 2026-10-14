@@ -3,19 +3,21 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { mapChannel } from "@/lib/channels";
 import { announceToChat } from "@/lib/telegram";
+import { channelOwncastBase, getOwncastState, mergeChannelWithOwncast } from "@/lib/owncast";
 
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-/** GET /api/channels/[slug] — один канал */
+/** GET /api/channels/[slug] — один канал (с реальным состоянием Owncast) */
 export async function GET(_req: NextRequest, ctx: Ctx) {
   const { slug } = await ctx.params;
   const user = await getSessionUser();
   const isAdmin = user?.role === "ADMIN";
   const channel = await db.channel.findUnique({ where: { slug } });
   if (!channel) return NextResponse.json({ error: "not_found" }, { status: 404 });
-  return NextResponse.json({ channel: mapChannel(channel, isAdmin) });
+  const merged = await mergeChannelWithOwncast(mapChannel(channel, isAdmin));
+  return NextResponse.json({ channel: merged });
 }
 
 /**
@@ -40,6 +42,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     liveTags?: string[];
     livePreviewUrl?: string | null;
     hlsUrl?: string | null;
+    owncastBaseUrl?: string | null;
     name?: string;
     tagline?: string | null;
     description?: string | null;
@@ -58,7 +61,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   const data: Record<string, unknown> = {};
-  if (typeof body.isLive === "boolean") data.isLive = body.isLive;
+  // Если движок Owncast доступен — эфир и HLS управляются движком (RTMP-пуш).
+  // Ручные isLive/hlsUrl из запроса применяются только в fallback-режиме.
+  const engineState = await getOwncastState(channelOwncastBase(channel));
+  const engineLive = engineState.reachable;
+  if (typeof body.isLive === "boolean" && !engineLive) data.isLive = body.isLive;
   if (body.liveTitle !== undefined) data.liveTitle = body.liveTitle?.slice(0, 140) ?? null;
   if (body.liveCategory !== undefined) data.liveCategory = body.liveCategory?.slice(0, 40) ?? null;
   if (body.liveTags !== undefined) {
@@ -67,7 +74,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     );
   }
   if (body.livePreviewUrl !== undefined) data.livePreviewUrl = body.livePreviewUrl || null;
-  if (body.hlsUrl !== undefined) data.hlsUrl = body.hlsUrl || null;
+  if (body.hlsUrl !== undefined && !engineLive) data.hlsUrl = body.hlsUrl || null;
+  if (body.owncastBaseUrl !== undefined) data.owncastBaseUrl = body.owncastBaseUrl || null;
   if (body.name !== undefined) data.name = body.name.slice(0, 40);
   if (body.tagline !== undefined) data.tagline = body.tagline?.slice(0, 80) ?? null;
   if (body.description !== undefined) data.description = body.description?.slice(0, 500) ?? null;
@@ -81,13 +89,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const wasLive = channel.isLive;
   const willBeLive = typeof data.isLive === "boolean" ? (data.isLive as boolean) : wasLive;
-  if (!wasLive && willBeLive) {
-    data.liveStartedAt = new Date();
-    data.viewers = 0;
-  }
-  if (wasLive && !willBeLive) {
-    data.liveStartedAt = null;
-    data.viewers = 0;
+  if (!engineLive) {
+    if (!wasLive && willBeLive) {
+      data.liveStartedAt = new Date();
+      data.viewers = 0;
+    }
+    if (wasLive && !willBeLive) {
+      data.liveStartedAt = null;
+      data.viewers = 0;
+    }
   }
   if (body.resetStreamKey) {
     // генерируем новый ключ через cuid-подобную строку
@@ -96,11 +106,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
   const updated = await db.channel.update({ where: { slug }, data });
 
-  if (!wasLive && willBeLive) {
-    announceToChat(slug, `Эфир начался: ${updated.liveTitle ?? updated.name}`);
-  } else if (wasLive && !willBeLive) {
-    announceToChat(slug, "Эфир завершён. Спасибо, что были с нами!");
+  if (!engineLive) {
+    if (!wasLive && willBeLive) {
+      announceToChat(slug, `Эфир начался: ${updated.liveTitle ?? updated.name}`);
+    } else if (wasLive && !willBeLive) {
+      announceToChat(slug, "Эфир завершён. Спасибо, что были с нами!");
+    }
   }
 
-  return NextResponse.json({ channel: mapChannel(updated, true) });
+  const merged = await mergeChannelWithOwncast(mapChannel(updated, true));
+  return NextResponse.json({ channel: merged });
 }

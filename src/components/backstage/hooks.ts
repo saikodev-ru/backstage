@@ -46,7 +46,7 @@ export function useChannels() {
 
   useEffect(() => {
     const first = window.setTimeout(() => void refresh(), 0);
-    const t = setInterval(() => void refresh(), 20000);
+    const t = setInterval(() => void refresh(), 10_000); // статус Owncast обновляется шустро
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => {
