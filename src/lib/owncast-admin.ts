@@ -1,11 +1,17 @@
-// Админ-API Owncast: конфигурация транскодирования (варианты качества).
+// Админ-API Owncast: конфигурация транскодирования (варианты качества)
+// и стрим-ключи инжеста.
 //
 // Owncast режет входящий RTMP в несколько HLS-вариантов. Настройки живут в
 // движке и меняются через Admin API (Basic-auth по паролю из env):
-//   GET  /api/admin/serverconfig                        → videoSettings
+//   GET  /api/admin/serverconfig                        → videoSettings + streamKeys
 //   POST /api/admin/config/video/streamoutputvariants   → { value: [...] }
-// Изменения применяются к следующему эфиру (RTMP-пуш).
+//   POST /api/admin/config/streamkeys                   → { value: [{comment,key}] }
+// Изменения применяются к следующему эфиру (RTMP-пуш); смена стрим-ключа —
+// к новым RTMP-подключениям (активный эфир не рвётся).
+// NB: ключ задаётся БЕЗ флага -streamkey в run.ts, иначе флаг
+// перекрывает список из конфига и регенерация не действует.
 
+import { randomBytes } from "node:crypto";
 import { OWNCast_BASE_URL } from "@/lib/owncast";
 
 const ADMIN_PASSWORD = process.env.OWNCAST_ADMIN_PASSWORD ?? "backstage-admin-2024";
@@ -103,6 +109,71 @@ export async function getOwncastVideoSettings(baseUrl: string = OWNCast_BASE_URL
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* ── Стрим-ключи инжеста (Owncast ≥ 0.3.0) ─────────────────────────────── */
+
+export type OwncastStreamKeyEntry = { comment: string; key: string };
+
+const streamKeysCache = new Map<string, { at: number; keys: OwncastStreamKeyEntry[] }>();
+const STREAM_KEYS_TTL_MS = 15_000;
+
+/** Список стрим-ключей движка (GET serverconfig, кэш 15с) */
+export async function getOwncastStreamKeys(
+  baseUrl: string = OWNCast_BASE_URL
+): Promise<OwncastStreamKeyEntry[] | null> {
+  const hit = streamKeysCache.get(baseUrl);
+  if (hit && Date.now() - hit.at < STREAM_KEYS_TTL_MS) return hit.keys;
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/serverconfig`, {
+      headers: adminHeaders(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { streamKeys?: OwncastStreamKeyEntry[] };
+    const keys = Array.isArray(json.streamKeys) ? json.streamKeys : [];
+    streamKeysCache.set(baseUrl, { at: Date.now(), keys });
+    return keys;
+  } catch {
+    return null;
+  }
+}
+
+/** Записать список ключей в движок (действует для новых RTMP-сессий) */
+export async function setOwncastStreamKeys(
+  entries: OwncastStreamKeyEntry[],
+  baseUrl: string = OWNCast_BASE_URL
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/config/streamkeys`, {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({ value: entries }),
+      signal: AbortSignal.timeout(4000),
+    });
+    const json = (await res.json().catch(() => ({}))) as { message?: string; success?: boolean };
+    const ok = res.ok && json.success !== false;
+    if (ok) streamKeysCache.set(baseUrl, { at: Date.now(), keys: entries });
+    return { ok, message: json.message ?? (res.ok ? "готово" : `HTTP ${res.status}`) };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "owncast недоступен" };
+  }
+}
+
+/** Текущий ключ инжеста (первый из списка; null — движок недоступен) */
+export async function getOwncastStreamKey(baseUrl: string = OWNCast_BASE_URL): Promise<string | null> {
+  const keys = await getOwncastStreamKeys(baseUrl);
+  return keys?.[0]?.key ?? null;
+}
+
+/** Регенерация ключа: новый случайный ключ применяется в движке сразу */
+export async function regenerateOwncastStreamKey(
+  baseUrl: string = OWNCast_BASE_URL
+): Promise<{ ok: boolean; message: string; key: string | null }> {
+  const key = `bs-${randomBytes(18).toString("hex")}`;
+  const res = await setOwncastStreamKeys([{ comment: "backstage", key }], baseUrl);
+  return { ok: res.ok, message: res.message, key: res.ok ? key : null };
 }
 
 export async function setOwncastVariants(

@@ -15,6 +15,7 @@ import {
   OWNCast_STREAM_KEY,
   getOwncastSummary,
 } from "@/lib/owncast";
+import { getOwncastStreamKey } from "@/lib/owncast-admin";
 import { announceToChat } from "@/lib/telegram";
 import { db } from "@/lib/db";
 
@@ -28,7 +29,12 @@ const RTMP_HOST = (() => {
     return "127.0.0.1";
   }
 })();
-const RTMP_TARGET = `rtmp://${RTMP_HOST}:1935/live/${OWNCast_STREAM_KEY}`;
+
+/** Цель демо-пуша: текущий ключ движка (может быть отрегенерирован из UI) */
+async function rtmpTarget(): Promise<string> {
+  const key = (await getOwncastStreamKey()) ?? OWNCast_STREAM_KEY;
+  return `rtmp://${RTMP_HOST}:1935/live/${key}`;
+}
 
 /** Жив ли процесс демо-эфира (pid-файл переживает hot-reload) */
 function demoRunning(): number | null {
@@ -50,10 +56,12 @@ function clearPid(): void {
   }
 }
 
-function startDemo(): { ok: boolean } {
-  if (demoRunning()) return { ok: true };
+async function startDemo(): Promise<{ ok: boolean; message: string }> {
+  if (demoRunning()) return { ok: true, message: "уже работает" };
 
-  // 1080p60 — источник для лестницы транскодирования (1080p60/720p60/480p/360p)
+  const target = await rtmpTarget();
+
+  // 1080p60 — источник для лестницы транскодирования
   const child = spawn(
     "ffmpeg",
     [
@@ -64,13 +72,13 @@ function startDemo(): { ok: boolean } {
       "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
       "-pix_fmt", "yuv420p", "-b:v", "6000k", "-maxrate", "6400k", "-bufsize", "9000k",
       "-c:a", "aac", "-b:a", "128k",
-      "-f", "flv", RTMP_TARGET,
+      "-f", "flv", target,
     ],
     { detached: true, stdio: "ignore" }
   );
   child.unref();
   if (child.pid) fs.writeFileSync(PID_FILE, String(child.pid));
-  return { ok: Boolean(child.pid) };
+  return { ok: Boolean(child.pid), message: child.pid ? "запущен" : "ffmpeg не стартовал" };
 }
 
 function stopDemo(): { ok: boolean } {
@@ -98,11 +106,11 @@ export async function GET() {
   if (user?.role !== "ADMIN") {
     return NextResponse.json({ error: "forbidden", message: "Только администратор" }, { status: 403 });
   }
-  const engine = await getOwncastSummary();
+  const [engine, key] = await Promise.all([getOwncastSummary(), getOwncastStreamKey()]);
   return NextResponse.json({
     running: demoRunning() !== null,
     engine,
-    rtmp: { url: OWNCast_RTMP_URL, key: OWNCast_STREAM_KEY },
+    rtmp: { url: OWNCast_RTMP_URL, key: key ?? OWNCast_STREAM_KEY },
     hls: { url: "/api/stream/hls/stream.m3u8" },
   });
 }
@@ -126,9 +134,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "bad_action", message: "action = start | stop" }, { status: 400 });
   }
 
-  const result = action === "start" ? startDemo() : stopDemo();
+  const result = action === "start" ? await startDemo() : stopDemo();
   if (!result.ok) {
-    return NextResponse.json({ error: "ffmpeg_failed", message: "Не удалось запустить ffmpeg" }, { status: 500 });
+    return NextResponse.json({ error: "ffmpeg_failed", message: result.message ?? "Не удалось запустить ffmpeg" }, { status: 500 });
   }
 
   // Сообщение в чат: эфир стартовал/завершился (как при реальном OBS-эфире)

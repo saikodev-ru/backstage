@@ -24,6 +24,8 @@ type AppState = {
   channels: PublicChannel[];
   authOpen: boolean;
   adminOpen: boolean;
+  /** Демо-режим авторизации (консольная команда demo()): кнопки входа работают без Telegram + чекбоксы ролей */
+  demoAuth: boolean;
 
   setView: (v: View) => void;
   openChannel: (slug: string) => void;
@@ -34,6 +36,7 @@ type AppState = {
   patchChannel: (slug: string, patch: Partial<PublicChannel>) => void;
   setAuthOpen: (b: boolean) => void;
   setAdminOpen: (b: boolean) => void;
+  setDemoAuth: (b: boolean) => void;
 };
 
 function createBackstageStore(initial: { channels: PublicChannel[]; user: PublicUser | null }) {
@@ -46,6 +49,7 @@ function createBackstageStore(initial: { channels: PublicChannel[]; user: Public
     channels: initial.channels,
     authOpen: false,
     adminOpen: false,
+    demoAuth: false,
 
     setView: (view) => set({ view }),
     openChannel: (slug) => set({ view: "live", activeChannel: slug }),
@@ -56,6 +60,7 @@ function createBackstageStore(initial: { channels: PublicChannel[]; user: Public
       set((s) => ({ channels: s.channels.map((c) => (c.slug === slug ? { ...c, ...patch } : c)) })),
     setAuthOpen: (authOpen) => set({ authOpen }),
     setAdminOpen: (adminOpen) => set({ adminOpen }),
+    setDemoAuth: (demoAuth) => set({ demoAuth }),
   }));
 }
 

@@ -18,7 +18,60 @@ import { SettingsView } from "@/components/backstage/views/settings-view";
 import { ChannelView } from "@/components/backstage/views/channel-view";
 import { AuthDialog } from "@/components/backstage/auth-dialog";
 import { AdminPanel } from "@/components/backstage/admin-panel";
+import { HostOnboarding, DEMO_ONBOARDING_EVENT } from "@/components/backstage/host-onboarding";
 import type { PublicChannel, PublicUser } from "@/lib/types";
+
+// Консольная команда демо-режима (объявляем тип)
+declare global {
+  interface Window {
+    demo?: (arg?: string) => void;
+  }
+}
+
+const DEMO_AUTH_KEY = "bs-demo-auth";
+
+/**
+ * Консольная команда demo() — переключатель демо-режима авторизации:
+ * кнопки входа работают без Telegram, у зрителя появляются чекбоксы
+ * «подписчик»/«модератор» (отладка гейтов). demo("onboarding") —
+ * принудительно открыть окно создания канала ведущего.
+ */
+function useDemoModeBridge() {
+  const setDemoAuth = useBackstageStore((s) => s.setDemoAuth);
+  useEffect(() => {
+    const read = () => {
+      try {
+        return window.localStorage.getItem(DEMO_AUTH_KEY) === "1";
+      } catch {
+        return false;
+      }
+    };
+    setDemoAuth(read());
+    window.demo = (arg?: string) => {
+      if (arg === "onboarding") {
+        window.dispatchEvent(new CustomEvent(DEMO_ONBOARDING_EVENT));
+        console.log('[backstage] окно создания канала открыто (отладка, demo("onboarding"))');
+        return;
+      }
+      const next = !read();
+      try {
+        window.localStorage.setItem(DEMO_AUTH_KEY, next ? "1" : "0");
+      } catch {
+        /* приватный режим браузера */
+      }
+      setDemoAuth(next);
+      console.log(
+        `[backstage] демо-режим авторизации: ${next ? "ВКЛЮЧЁН" : "ВЫКЛЮЧЕН"}. ` +
+          "В диалоге входа " +
+          (next ? "появились демо-кнопки и чекбоксы ролей" : "снова только Telegram") +
+          '. Подсказка: demo("onboarding") — окно создания канала.'
+      );
+    };
+    return () => {
+      delete window.demo;
+    };
+  }, [setDemoAuth]);
+}
 
 /** Бегущая строка: эфир идёт, а пользователь смотрит другой раздел */
 function LiveTicker({ channel }: { channel: PublicChannel }) {
@@ -70,6 +123,7 @@ function LiveTicker({ channel }: { channel: PublicChannel }) {
 function Shell() {
   const { view, activeChannel, openChannel, openChannelPage, channels } = useBackstageStore();
   useChannels(); // polling каналов + конфиг авторизации
+  useDemoModeBridge(); // консольная команда demo()
 
   // Hash-роутинг: #ch-<slug> (эфир), #chp-<slug> (страница канала) — шаринг ссылок
   useEffect(() => {
@@ -132,6 +186,7 @@ function Shell() {
       <MobileNav />
       <AuthDialog />
       <AdminPanel />
+      <HostOnboarding />
     </div>
   );
 }

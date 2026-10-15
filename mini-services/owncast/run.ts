@@ -1,11 +1,12 @@
 // Раннер Owncast для BACKSTAGE.
 // Держит процесс Owncast живым (авторестарт при падении) с детерминированными
-// флагами: веб на 127.0.0.1:8080, RTMP на 1935, админ-пароль и стрим-ключ —
-// из переменных окружения (или дефолты ниже).
+// флагами: веб на 127.0.0.1:8080, RTMP на 1935, админ-пароль — из env.
+// NB: стрим-ключ БЕЗ флага -streamkey — ключи управляются через Admin API
+// (POST /api/admin/config/streamkeys) и регенерируются из UI «УПРАВЛЕНИЕ».
+// Флаг перекрывает конфиг и ломает регенерацию — не возвращать!
 import { spawn } from "node:child_process";
 
 const ADMIN_PASSWORD = process.env.OWNCAST_ADMIN_PASSWORD ?? "backstage-admin-2024";
-const STREAM_KEY = process.env.OWNCAST_STREAM_KEY ?? "bs-dypaGPT";
 const HTTP_PORT = process.env.OWNCAST_HTTP_PORT ?? "8080";
 const RTMP_PORT = String(process.env.OWNCAST_RTMP_PORT ?? "1935");
 
@@ -14,7 +15,6 @@ const args = [
   "-webserverport", HTTP_PORT,
   "-rtmpport", RTMP_PORT,
   "-adminpassword", ADMIN_PASSWORD,
-  "-streamkey", STREAM_KEY,
 ];
 
 console.log(`[owncast-runner] запуск: ./owncast ${args.join(" ")}`);

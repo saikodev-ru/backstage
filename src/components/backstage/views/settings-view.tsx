@@ -1,25 +1,23 @@
 "use client";
 
 // Страница настроек канала (для автора): внешний вид (никнейм, аватар с
-// кадрированием, баннер с кадрированием 16:9, слоган) и трансляция (адрес
-// сервера, ключ трансляции, категория эфира, режим чата — заглушка).
+// кадрированием, баннер 16:9, слоган, донаты), OBS-интеграция (оверлей чата,
+// HTTP API) и модерация чата. Адрес сервера/ключ потока и настройки эфира
+// живут в панели «УПРАВЛЕНИЕ» (пилюля в топбаре).
 // Доступ: шестерёнка в топбаре / пункт профиля (только ADMIN).
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Ban as BanIcon,
   Check,
   Coins,
   Copy,
-  Eye,
-  EyeOff,
   Image as ImageIcon,
-  KeyRound,
-  Link2,
-  MessageSquare,
+  MonitorPlay,
   Palette,
   RefreshCcw,
-  Server,
+  Sword,
   Type,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -27,14 +25,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { CategoryPicker } from "@/components/backstage/category-picker";
 import { CROP_AVATAR, CROP_BANNER, CropUploadButton } from "@/components/backstage/crop-dialog";
 import { useBackstageStore } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
-import { findCategory } from "@/lib/categories";
 import type { PublicChannel } from "@/lib/types";
 
 /* ── Небольшие строительные блоки страницы ─────────────────────────────── */
@@ -167,30 +162,55 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
   const [bannerUrl, setBannerUrl] = useState(channel.bannerUrl ?? "");
   // Ссылка на поддержку (донаты) — кнопка «ПОДДЕРЖАТЬ» под эфиром
   const [donateLink, setDonateLink] = useState(channel.donateLink ?? "");
-  // Категория хранится как slug; легаси-значения (напр. «Just Chatting»)
-  // нормализуются к современному slug — иначе плитки не подсветятся.
-  const [category, setCategory] = useState(
-    channel.liveCategory ? (findCategory(channel.liveCategory)?.slug ?? channel.liveCategory) : ""
-  );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // Ключ трансляции
-  const [keyVisible, setKeyVisible] = useState(false);
-  const [resettingKey, setResettingKey] = useState(false);
+  /* ── Модерация чата (REST чат-сервиса) ──────────────────── */
+  type BanRow = { uid: string; name: string; reason: string; until: number };
+  type ModRow = { uid: string; name: string };
+  const [bans, setBans] = useState<BanRow[]>([]);
+  const [mods, setMods] = useState<ModRow[]>([]);
 
-  const streamKey = channel.streamKey ?? "";
-  const maskedKey = streamKey.length > 6 ? `${streamKey.slice(0, 4)}${"•".repeat(18)}${streamKey.slice(-2)}` : streamKey;
-  // Честный адрес OBS — всегда ЛОКАЛЬНЫЙ приёмник 127.0.0.1:
-  // • локальный запуск (localhost/127.0.0.1) — это сам Owncast, OBS коннектится напрямую;
-  // • облачное превью-песочница — наружу виден только HTTP-шлюз, RTMP-порт недоступен,
-  //   поэтому 127.0.0.1:1935 — это локальный мост (scripts/obs-bridge-client.mjs),
-  //   который переправляет поток через шлюз. Показывать rtmp://<hostname>:1935 нельзя —
-  //   этот адрес не работает из интернета.
-  const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
-  const isSandboxPreview = !isLocalHost;
-  const rtmpUrl = "rtmp://127.0.0.1:1935/live";
-  const bridgeCommand = `BRIDGE_URL="${window.location.origin}" bun scripts/obs-bridge-client.mjs`;
+  const chatSend = useCallback(
+    async (text: string) => {
+      try {
+        const tr = await fetch("/api/chat/token", { cache: "no-store" });
+        if (!tr.ok) throw new Error("нет токена");
+        const { token } = (await tr.json()) as { token: string };
+        const res = await fetch(`/api/send?XTransformPort=3003`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ channelSlug: channel.slug, text }),
+        });
+        const d = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !d.ok) throw new Error(d.error ?? "ошибка");
+        return true;
+      } catch (e) {
+        toast({ title: "Команда не выполнена", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
+        return false;
+      }
+    },
+    [channel.slug]
+  );
+
+  const refreshModeration = useCallback(async () => {
+    try {
+      const [b, m] = await Promise.all([
+        fetch(`/api/bans?XTransformPort=3003`, { cache: "no-store" }).then((r) => r.json() as Promise<{ bans?: BanRow[] }>),
+        fetch(`/api/mods?channel=${encodeURIComponent(channel.slug)}&XTransformPort=3003`, { cache: "no-store" }).then(
+          (r) => r.json() as Promise<{ mods?: ModRow[] }>
+        ),
+      ]);
+      setBans(b.bans ?? []);
+      setMods(m.mods ?? []);
+    } catch {
+      /* чат-сервис недоступен */
+    }
+  }, [channel.slug]);
+
+  useEffect(() => {
+    void refreshModeration();
+  }, [refreshModeration]);
 
   const patch = (field: string, value: string) => {
     setDirty(true);
@@ -216,7 +236,6 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           tagline: tagline.trim() || null,
           avatarUrl: avatarUrl.trim() || null,
           bannerUrl: bannerUrl.trim() || null,
-          liveCategory: category || null,
           donateLink: donateLink.trim() || null,
         }),
       });
@@ -229,7 +248,6 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
           tagline: data.channel.tagline,
           avatarUrl: data.channel.avatarUrl,
           bannerUrl: data.channel.bannerUrl,
-          liveCategory: data.channel.liveCategory,
           donateLink: data.channel.donateLink,
         });
       }
@@ -242,25 +260,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
     }
   };
 
-  const resetKey = async () => {
-    setResettingKey(true);
-    try {
-      const res = await fetch(`/api/channels/${channel.slug}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ resetStreamKey: true }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { channel?: PublicChannel; message?: string };
-      if (!res.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
-      if (data.channel) patchChannel(channel.slug, { streamKey: data.channel.streamKey });
-      setKeyVisible(true);
-      toast({ title: "Ключ трансляции обновлён", description: "Обновите его в OBS" });
-    } catch (e) {
-      toast({ title: "Не удалось обновить ключ", description: e instanceof Error ? e.message : "Ошибка", variant: "destructive" });
-    } finally {
-      setResettingKey(false);
-    }
-  };
+  const overlayUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/overlay?channel=${channel.slug}&XTransformPort=3003`;
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 pb-16 sm:p-6">
@@ -363,96 +363,112 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
         </div>
       </SectionCard>
 
-      {/* ── Трансляция ── */}
-      <SectionCard icon={Server} title="ТРАНСЛЯЦИЯ" description="Адрес сервера и ключ для OBS. Ключ держите в секрете.">
+      {/* ── OBS-интеграция ── */}
+      <SectionCard
+        icon={MonitorPlay}
+        title="OBS-ИНТЕГРАЦИЯ"
+        description="Оверлей чата для сцены OBS и HTTP API для ботов и виджетов."
+      >
         <div className="space-y-5">
-          <Field label="АДРЕС СЕРВЕРА (RTMP)" hint="для OBS: Настройки → Вещание">
+          <Field label="ЧАТ-ОВЕРЛЕЙ ДЛЯ BROWSER SOURCE" hint="OBS → Источники → Браузер">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-0 flex-1">
-                <Link2 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input readOnly value={rtmpUrl} className="pl-9 font-mono text-[13px]" aria-readonly />
+                <Input readOnly value={overlayUrl} className="bg-[#1a1a21] font-mono text-xs" aria-readonly />
               </div>
-              <CopyButton value={rtmpUrl} label="Адрес сервера" />
+              <CopyButton value={overlayUrl} label="URL оверлея чата" />
             </div>
-            {isSandboxPreview && (
-              <div className="space-y-2 rounded-lg border border-white/[.06] bg-black/20 p-3.5">
-                <p className="label-caps text-[11px] text-muted-foreground">Облачная песочница — нужен мост</p>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Прямой RTMP наружу недоступен (виден только HTTP-шлюз). Запустите на своём ПК мост из репозитория:
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <pre className="min-w-0 flex-1 overflow-x-auto rounded-md bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-foreground/90">
-                    {bridgeCommand}
-                  </pre>
-                  <CopyButton value={bridgeCommand} label="Команда запуска моста" />
-                </div>
-                <p className="text-[11px] leading-relaxed text-muted-foreground/70">
-                  Он поднимёт локальный приёмник rtmp://127.0.0.1:1935 и переправит поток в песочницу. Нужен bun или node ≥ 22.
-                </p>
-              </div>
-            )}
-          </Field>
-
-          <Field label="КЛЮЧ ТРАНСЛЯЦИИ" hint="секрет — не публикуйте">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-0 flex-1">
-                <KeyRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input
-                  readOnly
-                  value={keyVisible ? streamKey : maskedKey}
-                  className={cn("pl-9 font-mono text-[13px]", !keyVisible && "tracking-wider")}
-                  aria-label="Ключ трансляции"
-                />
-                <button
-                  type="button"
-                  aria-label={keyVisible ? "Скрыть ключ" : "Показать ключ"}
-                  onClick={() => setKeyVisible((v) => !v)}
-                  className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-white/10 hover:text-foreground"
-                >
-                  {keyVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </button>
-              </div>
-              <CopyButton value={streamKey} label="Ключ трансляции" />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={resettingKey}
-                className="label-caps h-9 gap-1.5 rounded-lg px-3 text-[11px]"
-                onClick={() => void resetKey()}
-              >
-                <RefreshCcw className={cn("size-3.5", resettingKey && "animate-spin")} />
-                СБРОСИТЬ
-              </Button>
-            </div>
-          </Field>
-
-          <Field label="КАТЕГОРИЯ ЭФИРА" hint="показывается под трансляцией">
-            <CategoryPicker
-              value={category}
-              onChange={(slug) => {
-                setDirty(true);
-                setCategory(slug);
-              }}
-            />
-          </Field>
-
-          <Field label="РЕЖИМ ЧАТА" hint="скоро">
-            <Select disabled value="open">
-              <SelectTrigger className="w-full" aria-label="Режим чата (заглушка)">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="glass-strong">
-                <SelectItem value="open">Открытый — пишут все</SelectItem>
-                <SelectItem value="subs" disabled>Только подписчики</SelectItem>
-                <SelectItem value="slow" disabled>Замедленный</SelectItem>
-                <SelectItem value="emote" disabled>Только эмодзи</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground/70">
-              <MessageSquare className="size-3.5" aria-hidden />
-              Продвинутые режимы чата появятся в следующем обновлении
+            <p className="text-xs text-muted-foreground">
+              Прозрачный чат с эмодзи 7TV/BTTV/FFZ, бейджами и авто-скроллом. Параметр
+              <code className="mx-1 rounded bg-black/30 px-1 font-mono text-[10px]">&scale=1.5</code>
+              увеличит размер текста.
             </p>
+          </Field>
+
+          <Field label="HTTP API ЧАТА" hint="для ботов и виджетов">
+            <pre className="max-h-44 overflow-auto rounded-md bg-black/40 p-2.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+{`GET  /api/messages?channel=${channel.slug}&limit=50&XTransformPort=3003
+POST /api/send  { "channelSlug": "${channel.slug}", "text": "…" }
+     + Authorization: Bearer <токен из /api/chat/token>
+GET  /api/emotes?XTransformPort=3003
+GET  /api/chstate?channel=${channel.slug}&XTransformPort=3003`}
+            </pre>
+          </Field>
+        </div>
+      </SectionCard>
+
+      {/* ── Модерация чата ── */}
+      <SectionCard
+        icon={Sword}
+        title="МОДЕРАЦИЯ ЧАТА"
+        description="Модераторы и баны. Назначить модератора: /mod имя в чате."
+      >
+        <div className="space-y-5">
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="label-caps h-7 gap-1 px-2 text-[10px] text-muted-foreground hover:text-foreground"
+              onClick={() => void refreshModeration()}
+            >
+              <RefreshCcw className="size-3.5" /> ОБНОВИТЬ
+            </Button>
+          </div>
+
+          <Field label={`МОДЕРАТОРЫ (${mods.length})`}>
+            <div className="max-h-28 space-y-1 overflow-y-auto">
+              {mods.length === 0 && (
+                <p className="text-xs text-muted-foreground/70">
+                  Пока никого. Назначить: <code className="rounded bg-black/30 px-1 font-mono text-[10px]">/mod имя</code> в чате
+                </p>
+              )}
+              {mods.map((m) => (
+                <div key={m.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+                  <Sword className="size-3.5 text-[#5ad1a4]" />
+                  <span className="font-semibold">{m.name}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      void chatSend(`/unmod ${m.name}`).then((ok) => {
+                        if (ok) void refreshModeration();
+                      });
+                    }}
+                  >
+                    СНЯТЬ
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Field>
+
+          <Field label={`АКТИВНЫЕ БАНЫ (${bans.length})`}>
+            <div className="max-h-28 space-y-1 overflow-y-auto">
+              {bans.length === 0 && (
+                <p className="text-xs text-muted-foreground/70">Банов нет — чат в мире и гармонии</p>
+              )}
+              {bans.map((b) => (
+                <div key={b.uid} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
+                  <BanIcon className="size-3.5 text-destructive" />
+                  <span className="font-semibold">{b.name}</span>
+                  <span className="text-muted-foreground">
+                    {b.until === 0 ? "навсегда" : `до ${new Date(b.until).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="label-caps ml-auto h-6 px-2 text-[10px] text-muted-foreground hover:text-primary"
+                    onClick={() => {
+                      void chatSend(`/unban ${b.name}`).then((ok) => {
+                        if (ok) void refreshModeration();
+                      });
+                    }}
+                  >
+                    РАЗБАН
+                  </Button>
+                </div>
+              ))}
+            </div>
           </Field>
         </div>
       </SectionCard>

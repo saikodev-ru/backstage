@@ -7,8 +7,9 @@
 //      { action: "variants", variants: [...] }   — ручной список
 
 import { NextRequest, NextResponse } from "next/server";
+import { spawn } from "node:child_process";
 import { getSessionUser } from "@/lib/auth";
-import { getOwncastSummary } from "@/lib/owncast";
+import { getOwncastState, getOwncastSummary } from "@/lib/owncast";
 import {
   getOwncastVideoSettings,
   presetVariants,
@@ -75,6 +76,36 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return NextResponse.json({ error: "engine_error", message: result.message }, { status: 502 });
   }
+
+  // Owncast применяет варианты транскодера при старте процесса: если эфир
+  // не идёт — мягко перезапускаем движок (раннер поднимет его сам), чтобы
+  // лестница вступила в силу сразу. При живом эфире не трогаем процесс.
+  const state = await getOwncastState();
+  let restarted = false;
+  if (!state.online) {
+    try {
+      const killer = spawn("pkill", ["-9", "-f", "./owncast"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      killer.unref();
+      // ждём подъёма движка (раннер перезапускает через ~2с)
+      for (let i = 0; i < 10 && !restarted; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        restarted = (await getOwncastVideoSettings()) !== null;
+      }
+    } catch {
+      /* перезапуск не удался — конфиг всё равно сохранён */
+    }
+  }
+
   const video = await getOwncastVideoSettings();
-  return NextResponse.json({ ok: true, message: result.message, videoSettings: video });
+  return NextResponse.json({
+    ok: true,
+    message: result.message,
+    videoSettings: video,
+    restarted,
+    // true — эфир идёт, движок не перезапускали: перезапустить при остановке
+    needsEngineRestart: state.online && !restarted,
+  });
 }

@@ -11,7 +11,6 @@ import {
   Radio,
   Search,
   Settings,
-  Settings2,
   ShieldCheck,
   UserRound,
   Video,
@@ -408,6 +407,23 @@ export function TopBar() {
             </button>
           )}
 
+          {/* Пилюля «УПРАВЛЕНИЕ» (только ведущий): широкая панель эфира */}
+          {user?.role === "ADMIN" && (
+            <button
+              type="button"
+              onClick={() => setAdminOpen(true)}
+              aria-label="Управление эфиром"
+              title="Управление эфиром"
+              className="label-caps ml-1 flex h-9 shrink-0 items-center gap-2 rounded-full bg-[#f2f2f5] pl-3 pr-3.5 text-[11px] font-bold tracking-wide text-[#101014] shadow-[0_6px_22px_-10px_rgba(255,255,255,.55)] transition-all hover:bg-white hover:shadow-[0_8px_28px_-8px_rgba(255,255,255,.7)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            >
+              <Radio
+                className={`size-4 shrink-0 ${liveChannel ? "text-live" : "text-[#101014]/70"}`}
+                aria-hidden
+              />
+              <span className="hidden sm:inline">УПРАВЛЕНИЕ</span>
+            </button>
+          )}
+
           {/* Настройки канала (только автор) */}
           {user?.role === "ADMIN" && (
             <Button
@@ -415,24 +431,10 @@ export function TopBar() {
               size="icon"
               aria-label="Настройки канала"
               title="Настройки канала"
-              className="rounded-full text-muted-foreground hover:bg-white/5 hover:text-foreground"
+              className="hidden rounded-full text-muted-foreground hover:bg-white/5 hover:text-foreground sm:flex"
               onClick={() => setView("settings")}
             >
               <Settings className="size-5" />
-            </Button>
-          )}
-
-          {/* Панель управления эфиром (пульт) */}
-          {user?.role === "ADMIN" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Панель управления"
-              title="Панель управления"
-              className="rounded-full text-muted-foreground hover:bg-white/5 hover:text-foreground"
-              onClick={() => setAdminOpen(true)}
-            >
-              <Settings2 className="size-5" />
             </Button>
           )}
 
