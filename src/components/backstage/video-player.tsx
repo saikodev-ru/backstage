@@ -235,16 +235,29 @@ export function VideoPlayer({
         wctx.drawImage(video, cx - dw * 0.78, cy - dh * 0.78, dw * 1.56, dh * 1.56);
         wctx.globalAlpha = 1;
         wctx.filter = "none";
-        // радиальное затухание: плато у плеера → прозрачно у краёв бокса
-        const r = Math.hypot(Math.max(cx, ROOM_W - cx), Math.max(cy, ROOM_H - cy));
-        if (r > 1) {
+        // Радиальное затухание — ЭЛЛИПТИЧЕСКОЕ, по пропорциям канваса
+        // (scale по вертикали: круг r=cx → эллипс с полуосями cx×cy).
+        // Прежний КРУГЛОЙ градиент с r=hypot(cx,cy) доходил до нуля только
+        // в углах: у середины нижней кромки оставалось ~0.8 альфы — свечение
+        // резко «обрезалось» на 24vh ниже плеера. Эллипс с нулём на 0.9
+        // полуоси гаснет ДО любой кромки — обреза нет ни снизу, ни сбоку.
+        if (cx > 1) {
           wctx.globalCompositeOperation = "destination-in";
-          const g = wctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
+          wctx.save();
+          wctx.translate(cx, cy);
+          wctx.scale(1, cy / cx);
+          wctx.translate(-cx, -cy);
+          const g = wctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
           g.addColorStop(0, "rgba(0,0,0,1)");
-          g.addColorStop(0.66, "rgba(0,0,0,0.62)");
+          g.addColorStop(0.32, "rgba(0,0,0,0.95)");
+          g.addColorStop(0.6, "rgba(0,0,0,0.62)");
+          g.addColorStop(0.9, "rgba(0,0,0,0)");
           g.addColorStop(1, "rgba(0,0,0,0)");
           wctx.fillStyle = g;
-          wctx.fillRect(0, 0, ROOM_W, ROOM_H);
+          // заливаем область больше канваса (в трансформ-пространстве),
+          // чтобы маска покрыла весь битмап
+          wctx.fillRect(-cx, -cx, ROOM_W + 2 * cx, ROOM_W + 2 * cx);
+          wctx.restore();
           wctx.globalCompositeOperation = "source-over";
         }
       } catch {

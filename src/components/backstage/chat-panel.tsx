@@ -6,6 +6,9 @@
 // сообщения, настройки чата (шестерёнка: цвет ника из палитры Twitch, размер
 // текста, время сообщений), ввод: Enter на десктопе / компактная кнопка на мобиле.
 // v5.1: onCollapse — шеврон сворачивания в хедере (мобильная раскладка эфира).
+// v5.2: индикатор загрузки (спиннер, как у плеера) до прихода chat:history;
+//       ввод на мобиле — 16px (iOS не зумит страницу при фокусе); overscroll-
+//       contain — скролл чата не «протекает» в страницу под ним.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { io, type Socket } from "socket.io-client";
@@ -471,6 +474,9 @@ export function ChatPanel({
   const [messages, setMessages] = useState<ChatMessageDto[]>([]);
   const [viewers, setViewers] = useState<number>(channel?.viewers ?? 0);
   const [connected, setConnected] = useState(false);
+  // История загружена (chat:history получен) — до этого момента в области
+  // сообщений крутится индикатор загрузки (как у плеера), а не пустота
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [draft, setDraft] = useState("");
   const [token, setToken] = useState<string | null>(null);
 
@@ -555,6 +561,7 @@ export function ChatPanel({
     socket.on("connect", () => {
       setConnected(true);
       setMessages([]);
+      setHistoryLoaded(false); // (пере)подключение — ждём историю заново
       socket.emit("channel:join", { channelSlug });
     });
     socket.on("disconnect", () => setConnected(false));
@@ -562,6 +569,7 @@ export function ChatPanel({
     socket.on("chat:history", (data: { channelSlug: string; messages: ChatMessageDto[] }) => {
       if (data.channelSlug !== channelSlug) return;
       setMessages(data.messages);
+      setHistoryLoaded(true);
       requestAnimationFrame(scrollToBottom);
     });
 
@@ -614,6 +622,7 @@ export function ChatPanel({
       socket.disconnect();
       socketRef.current = null;
       setConnected(false);
+      setHistoryLoaded(false);
       setMessages([]);
     };
   }, [token, channelSlug, scrollToBottom, patchChannel]);
@@ -740,19 +749,33 @@ export function ChatPanel({
 
       {/* Сообщения */}
       <div className="relative min-h-0 flex-1">
+        {/* Индикатор загрузки — как у плеера: спиннер, пока история не
+            приехала ((пере)подключение к чат-сервису) */}
+        {!historyLoaded && (
+          <div
+            className="pointer-events-none absolute inset-0 grid place-items-center"
+            role="status"
+            aria-label="Чат загружается"
+          >
+            <div className="grid place-items-center gap-3">
+              <div className="size-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+              <p className="label-caps text-[11px] text-muted-foreground/60">ПОДКЛЮЧАЕМСЯ К ЧАТУ…</p>
+            </div>
+          </div>
+        )}
         <div
           ref={ref}
           className={cn(
-            "chat-fade-top absolute inset-0 overflow-y-auto px-2 py-2",
+            "chat-fade-top absolute inset-0 overflow-y-auto overscroll-contain px-2 py-2",
             TEXT_SIZE_CLASS[chatSettings.textSize]
           )}
           role="log"
           aria-live="polite"
         >
-          {list.length === 0 && (
+          {list.length === 0 && historyLoaded && (
             <div className="grid h-full place-items-center">
               <p className="label-caps max-w-52 text-center text-[11px] text-muted-foreground/60">
-                {connected ? "Сообщений пока нет" : "Подключаемся к чату…"}
+                Сообщений пока нет
               </p>
             </div>
           )}
@@ -874,7 +897,9 @@ export function ChatPanel({
                 placeholder="Отправить сообщение"
                 aria-label="Сообщение в чат"
                 maxLength={500}
-                className="rounded-lg border-white/10 bg-white/[.05] pr-[6.75rem] text-[13px] placeholder:text-muted-foreground/50 focus-visible:ring-white/40 md:pr-[5rem]"
+                // 16px на мобиле: iOS Safari не зумит страницу при фокусе
+                // (зум сломал бы распознавание клавиатуры по visualViewport)
+                className="rounded-lg border-white/10 bg-white/[.05] pr-[6.75rem] text-[16px] placeholder:text-muted-foreground/50 focus-visible:ring-white/40 md:pr-[5rem] md:text-[13px]"
               />
               <div className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
                 <ChatSettingsMenu settings={chatSettings} />

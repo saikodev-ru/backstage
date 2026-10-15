@@ -248,6 +248,19 @@ export function useAutoScroll<T>(dep: T, tolerance = 120) {
     return () => cancelAnimationFrame(raf);
   }, [dep]);
 
+  // Ресайз контейнера (мобильная клавиатура / разворот fixed-чата): если
+  // читатель был прижат к низу — прижимаем и после ресайза, иначе список
+  // «отлипает» от низа и показывает старые сообщения
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (pinned.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const scrollToBottom = useCallback(() => {
     const el = ref.current;
     if (!el) return;

@@ -7,6 +7,7 @@
 // справа от md (drag-resize + сворачивание), внизу — только мобилки.
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -621,6 +622,11 @@ export function LiveView() {
   const [mobileChatOpen, setMobileChatOpen] = useState(true);
   const [subOpen, setSubOpen] = useState(false);
 
+  // Портал мобильного чата (fixed-оверлей в body) — только после гидратации:
+  // SSR-разметка порталом невозможна, хрупких расхождений нет
+  const [portalReady, setPortalReady] = useState(false);
+  useEffect(() => setPortalReady(true), []);
+
   // Мобильный чат + жест «назад» (Twitch-мобайл): разворот чата пользователем
   // добавляет запись истории — «назад» сначала СВОРАЧИВАЕТ чат, а не уводит
   // со страницы. Закрытие шевроном схлопывает эту же запись (без «мёртвых»
@@ -657,6 +663,38 @@ export function LiveView() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [mobileChatOpen]);
+
+  // ── Мобильная клавиатура (Twitch-мобайл) ────────────────────────────────
+  // Чат закреплён за низ страницы (fixed). Когда пользователь фокусирует
+  // ввод, клавиатура съедает часть экрана — visualViewport сообщает
+  // ОСТАВШУЮСЯ видимую область. Панель чата растягивается на весь
+  // visualViewport и поднимается над клавиатурой (top = offsetTop,
+  // height = vv.height): стрим визуально скрывается за чатом, ввод
+  // остаётся над клавиатурой. Пинч-зум (scale > 1) клавиатурой не считаем.
+  const [kbBox, setKbBox] = useState<{ top: number; height: number } | null>(null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = 0;
+    const apply = () => {
+      raf = 0;
+      const keyboard =
+        window.innerHeight - vv.height > 150 && vv.scale < 1.05 &&
+        window.matchMedia("(max-width: 767px)").matches;
+      setKbBox(keyboard ? { top: vv.offsetTop, height: vv.height } : null);
+    };
+    const schedule = () => {
+      if (!raf) raf = window.requestAnimationFrame(apply);
+    };
+    vv.addEventListener("resize", schedule);
+    vv.addEventListener("scroll", schedule);
+    apply();
+    return () => {
+      if (raf) window.cancelAnimationFrame(raf);
+      vv.removeEventListener("resize", schedule);
+      vv.removeEventListener("scroll", schedule);
+    };
+  }, []);
 
   const chatLayout = useSyncExternalStore(subscribeChatLayout, readChatLayout, chatLayoutServer);
 
@@ -713,10 +751,11 @@ export function LiveView() {
   // свет заходит ровно под левый рельс (inset -left-[72px] у room-слоя,
   // см. video-player) и сайдбар (z-10 в left-rail) просвечивает свечением.
   // clip (не hidden) не создаёт скролл-контейнер — sticky-чат работает.
+  // pb (мобайл) — место под fixed-панель чата у низа страницы.
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col overflow-x-clip md:flex-row lg:overflow-x-visible">
       {/* Левая часть: плеер вплотную к краям + инфо + «О канале» */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 pb-[calc(2.75rem+env(safe-area-inset-bottom))] md:pb-0">
         {/* ── Плеер (edge-to-edge, без контуров и скруглений) ── */}
         {channel.isLive ? (
           <VideoPlayer
@@ -1010,39 +1049,66 @@ export function LiveView() {
           </div>
         </div>
 
-        {/* ── Чат (мобильные): сворачиваемая секция сразу под инфо-баром —
-            Twitch-мобайл: свёрнут — тонкая шапка-тумблер; развёрнут — панель
-            ~56dvh с шевроном в хедере; жест «назад» сворачивает чат ── */}
-        <div className="relative z-10 md:hidden">
-          {!mobileChatOpen ? (
-            <button
-              type="button"
-              onClick={toggleMobileChat}
-              aria-expanded={false}
-              className="flex h-11 w-full items-center gap-2 border-b border-white/5 px-4 text-left transition-colors hover:bg-white/[.03]"
-            >
-              <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="label-caps text-[11px] text-muted-foreground">ЧАТ ТРАНСЛЯЦИИ</span>
-              {channel.isLive && (
-                <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-live">
-                  {formatCount(Math.max(channel.viewers, 1))}
-                </span>
+        {/* ── Чат (мобильные): закреплён за НИЗ страницы — Twitch-мобайл.
+            Раньше чат жил в потоке страницы; теперь — fixed-оверлей у нижней
+            кромки: свёрнут — тонкая шапка-тумблер (+ safe-area); развёрнут —
+            стеклянная панель ~56dvh. С открытой клавиатурой (visualViewport)
+            панель растягивается на весь видимый экран и поднимается над
+            клавиатурой, визуально перекрывая стрим.
+            Рендер через портал в body: main.view-in держит transform после
+            анимации (fill-mode: both) → fixed-потомок позиционировался бы
+            от main, а не от вьюпорта. */}
+        {portalReady &&
+          createPortal(
+            <div
+              className={cn(
+                "fixed inset-x-0 bottom-0 md:hidden",
+                kbBox && mobileChatOpen ? "z-[60]" : "z-30"
               )}
-              <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-                Развернуть
-                <ChevronUp className="size-4" aria-hidden />
-              </span>
-            </button>
-          ) : (
-            <div className="h-[56dvh] min-h-[20rem]">
-              <ChatPanel
-                channelSlug={channel.slug}
-                onCollapse={toggleMobileChat}
-                className="size-full"
-              />
-            </div>
+              style={
+                kbBox && mobileChatOpen
+                  ? { top: `${kbBox.top}px`, height: `${kbBox.height}px`, bottom: "auto" }
+                  : undefined
+              }
+            >
+              {!mobileChatOpen ? (
+                <div className="border-t border-white/10 bg-black/75 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
+                  <button
+                    type="button"
+                    onClick={toggleMobileChat}
+                    aria-expanded={false}
+                    className="flex h-11 w-full items-center gap-2 px-4 text-left transition-colors hover:bg-white/[.03]"
+                  >
+                    <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="label-caps text-[11px] text-muted-foreground">ЧАТ ТРАНСЛЯЦИИ</span>
+                    {channel.isLive && (
+                      <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-live">
+                        {formatCount(Math.max(channel.viewers, 1))}
+                      </span>
+                    )}
+                    <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                      Развернуть
+                      <ChevronUp className="size-4" aria-hidden />
+                    </span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "flex flex-col border-t border-white/10",
+                    kbBox ? "h-full bg-[#0f0f13]/[.98]" : "glass-panel h-[56dvh] min-h-[20rem]"
+                  )}
+                >
+                  <ChatPanel
+                    channelSlug={channel.slug}
+                    onCollapse={toggleMobileChat}
+                    className="min-h-0 flex-1"
+                  />
+                </div>
+              )}
+            </div>,
+            document.body
           )}
-        </div>
 
         {/* ── «О канале»: описание + панели (редактор для автора) ──
             z-10 — поверх эмбиент-свечения плеера */}
