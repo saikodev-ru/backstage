@@ -1,0 +1,12 @@
+{
+  "name": "rtmp-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BACKSTAGE — мост RTMP поверх WebSocket: WS :3004 (через шлюз ?XTransformPort=3004) → RTMP 127.0.0.1:1935 (Owncast). Позволяет стримить из OBS извне песочницы.",
+  "scripts": {
+    "dev": "bun --hot index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

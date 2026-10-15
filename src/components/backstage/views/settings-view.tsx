@@ -181,7 +181,16 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
 
   const streamKey = channel.streamKey ?? "";
   const maskedKey = streamKey.length > 6 ? `${streamKey.slice(0, 4)}${"•".repeat(18)}${streamKey.slice(-2)}` : streamKey;
-  const rtmpUrl = `rtmp://${window.location.hostname}:1935/live`;
+  // Честный адрес OBS — всегда ЛОКАЛЬНЫЙ приёмник 127.0.0.1:
+  // • локальный запуск (localhost/127.0.0.1) — это сам Owncast, OBS коннектится напрямую;
+  // • облачное превью-песочница — наружу виден только HTTP-шлюз, RTMP-порт недоступен,
+  //   поэтому 127.0.0.1:1935 — это локальный мост (scripts/obs-bridge-client.mjs),
+  //   который переправляет поток через шлюз. Показывать rtmp://<hostname>:1935 нельзя —
+  //   этот адрес не работает из интернета.
+  const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+  const isSandboxPreview = !isLocalHost;
+  const rtmpUrl = "rtmp://127.0.0.1:1935/live";
+  const bridgeCommand = `BRIDGE_URL="${window.location.origin}" bun scripts/obs-bridge-client.mjs`;
 
   const patch = (field: string, value: string) => {
     setDirty(true);
@@ -365,6 +374,23 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
               </div>
               <CopyButton value={rtmpUrl} label="Адрес сервера" />
             </div>
+            {isSandboxPreview && (
+              <div className="space-y-2 rounded-lg border border-white/[.06] bg-black/20 p-3.5">
+                <p className="label-caps text-[11px] text-muted-foreground">Облачная песочница — нужен мост</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Прямой RTMP наружу недоступен (виден только HTTP-шлюз). Запустите на своём ПК мост из репозитория:
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <pre className="min-w-0 flex-1 overflow-x-auto rounded-md bg-black/40 p-2.5 font-mono text-[11px] leading-relaxed text-foreground/90">
+                    {bridgeCommand}
+                  </pre>
+                  <CopyButton value={bridgeCommand} label="Команда запуска моста" />
+                </div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+                  Он поднимёт локальный приёмник rtmp://127.0.0.1:1935 и переправит поток в песочницу. Нужен bun или node ≥ 22.
+                </p>
+              </div>
+            )}
           </Field>
 
           <Field label="КЛЮЧ ТРАНСЛЯЦИИ" hint="секрет — не публикуйте">
