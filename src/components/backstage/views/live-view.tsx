@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { CategoryIcon } from "@/components/backstage/category-icon";
 import { ViewersIcon } from "@/components/backstage/icons";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useAuthActions, useContent, formatCount } from "@/components/backstage/hooks";
@@ -620,6 +621,43 @@ export function LiveView() {
   const [mobileChatOpen, setMobileChatOpen] = useState(true);
   const [subOpen, setSubOpen] = useState(false);
 
+  // Мобильный чат + жест «назад» (Twitch-мобайл): разворот чата пользователем
+  // добавляет запись истории — «назад» сначала СВОРАЧИВАЕТ чат, а не уводит
+  // со страницы. Закрытие шевроном схлопывает эту же запись (без «мёртвых»
+  // шагов назад).
+  const chatEntryPushed = useRef(false);
+  const toggleMobileChat = useCallback(() => {
+    if (mobileChatOpen) {
+      // закрытие кнопкой: если текущая запись — наша «чатовая», схлопываем её
+      if (chatEntryPushed.current && window.history.state?.bsChat) {
+        chatEntryPushed.current = false;
+        window.history.back(); // popstate закроет чат обработчиком ниже
+        return;
+      }
+      setMobileChatOpen(false);
+      return;
+    }
+    // разворот: добавляем запись (только мобильная раскладка);
+    // ...history.state — сохраняем приватные поля Next Router (без них
+    // popstate в эту запись уйдёт в hard-reload страницы)
+    setMobileChatOpen(true);
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+      window.history.pushState({ ...window.history.state, bsChat: true }, "", window.location.href);
+      chatEntryPushed.current = true;
+    }
+  }, [mobileChatOpen]);
+
+  useEffect(() => {
+    if (!mobileChatOpen) return;
+    // «назад» при развёрнутом чате — сворачиваем чат, страницу не трогаем
+    const onPop = () => {
+      chatEntryPushed.current = false;
+      setMobileChatOpen(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [mobileChatOpen]);
+
   const chatLayout = useSyncExternalStore(subscribeChatLayout, readChatLayout, chatLayoutServer);
 
   // Ссылка шаринга (SSR-безопасно: window только на клиенте)
@@ -670,12 +708,13 @@ export function LiveView() {
   const category = findCategory(channel.liveCategory);
   const viewCount = formatCount(Math.max(channel.viewers, 1));
 
-  // overflow-x-clip: эмбиент-слои плеера (ореол + «комнатный» свет) выходят
-  // за его края — без обрезки на мобильных они распирали страницу по
-  // горизонтали. clip (не hidden) не создаёт скролл-контейнер — sticky-чат
-  // продолжает работать.
+  // overflow-x-clip — только до lg: на мобильных/tablet эмбиент-слои плеера
+  // распирали страницу по горизонтали. На lg+ клип снимается: «комнатный»
+  // свет заходит ровно под левый рельс (inset -left-[72px] у room-слоя,
+  // см. video-player) и сайдбар (z-10 в left-rail) просвечивает свечением.
+  // clip (не hidden) не создаёт скролл-контейнер — sticky-чат работает.
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col overflow-x-clip md:flex-row">
+    <div className="flex min-h-[calc(100vh-4rem)] flex-col overflow-x-clip md:flex-row lg:overflow-x-visible">
       {/* Левая часть: плеер вплотную к краям + инфо + «О канале» */}
       <div className="min-w-0 flex-1">
         {/* ── Плеер (edge-to-edge, без контуров и скруглений) ── */}
@@ -779,6 +818,9 @@ export function LiveView() {
           </div>
         )}
 
+        {/* Тонкий разделитель: плеер → контент под ним (Twitch-стиль) */}
+        <div aria-hidden className="relative z-10 h-px w-full bg-white/10" />
+
         {/* ── Инфо-бар в стиле Twitch: полупрозрачная glass-панель поверх
             эмбиент-свечения (wash-канвас светит позади) ── */}
         <div className="fade-up glass-panel-bordered relative z-10 mx-2 mt-3 flex flex-wrap items-start gap-x-4 gap-y-3 rounded-2xl p-4 sm:mx-4">
@@ -839,7 +881,7 @@ export function LiveView() {
                   title="Категория"
                   className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 font-semibold text-foreground/80 transition-colors hover:bg-white/15"
                 >
-                  {category && <span aria-hidden className="text-[13px] leading-none">{category.emoji}</span>}
+                  {category && <CategoryIcon slug={category.slug} className="size-3.5 text-white" />}
                   {category?.name ?? channel.liveCategory}
                 </button>
               )}
@@ -968,6 +1010,40 @@ export function LiveView() {
           </div>
         </div>
 
+        {/* ── Чат (мобильные): сворачиваемая секция сразу под инфо-баром —
+            Twitch-мобайл: свёрнут — тонкая шапка-тумблер; развёрнут — панель
+            ~56dvh с шевроном в хедере; жест «назад» сворачивает чат ── */}
+        <div className="relative z-10 md:hidden">
+          {!mobileChatOpen ? (
+            <button
+              type="button"
+              onClick={toggleMobileChat}
+              aria-expanded={false}
+              className="flex h-11 w-full items-center gap-2 border-b border-white/5 px-4 text-left transition-colors hover:bg-white/[.03]"
+            >
+              <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="label-caps text-[11px] text-muted-foreground">ЧАТ ТРАНСЛЯЦИИ</span>
+              {channel.isLive && (
+                <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-live">
+                  {formatCount(Math.max(channel.viewers, 1))}
+                </span>
+              )}
+              <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+                Развернуть
+                <ChevronUp className="size-4" aria-hidden />
+              </span>
+            </button>
+          ) : (
+            <div className="h-[56dvh] min-h-[20rem]">
+              <ChatPanel
+                channelSlug={channel.slug}
+                onCollapse={toggleMobileChat}
+                className="size-full"
+              />
+            </div>
+          )}
+        </div>
+
         {/* ── «О канале»: описание + панели (редактор для автора) ──
             z-10 — поверх эмбиент-свечения плеера */}
         <div className="relative z-10">
@@ -1008,35 +1084,6 @@ export function LiveView() {
           <ChevronsLeft className="size-4" />
         </button>
       )}
-
-      {/* ── Чат: сворачиваемый блок внизу — ТОЛЬКО мобильные ── */}
-      <div className="px-2 pt-2 md:hidden">
-        <button
-          onClick={() => setMobileChatOpen((v) => !v)}
-          aria-expanded={mobileChatOpen}
-          className="glass label-caps flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-[12px]"
-        >
-          <span className="flex items-center gap-1.5 text-foreground">
-            <ViewersIcon className="size-4" />
-            ЧАТ
-          </span>
-          {channel.isLive && (
-            <span className="rounded-full bg-live/15 px-2 py-px text-[11px] font-bold text-live">
-              {formatCount(Math.max(channel.viewers, 1))}
-            </span>
-          )}
-          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-            {mobileChatOpen ? "Свернуть" : "Развернуть"}
-            {mobileChatOpen ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
-          </span>
-        </button>
-        {mobileChatOpen && (
-          <ChatPanel
-            channelSlug={channel.slug}
-            className="glass-panel-bordered mt-2 h-[62vh] min-h-80 overflow-hidden rounded-2xl"
-          />
-        )}
-      </div>
 
       {/* Диалог платной подписки */}
       <SubscribeDialog channel={channel} open={subOpen} onOpenChange={setSubOpen} />

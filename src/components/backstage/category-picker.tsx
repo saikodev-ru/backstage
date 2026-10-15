@@ -1,11 +1,12 @@
 "use client";
 
-// Выбор категории эфира: компактная сетка плиток (emoji + название).
-// Используется в настройках канала и в пульте эфира (внутри диалогов).
-// value — slug категории; если значение не совпадает ни с одной
-// категорией (легаси-строка), активной плитки нет.
+// Выбор категории эфира: компактная сетка плиток (белая залитая
+// svg-иконка + название). Используется в настройках канала и в пульте
+// эфира (внутри диалогов). value — slug категории; если значение не
+// совпадает ни с одной категорией (легаси-строка), активной плитки нет.
 
 import { CATEGORIES } from "@/lib/categories";
+import { CategoryIcon } from "@/components/backstage/category-icon";
 import { cn } from "@/lib/utils";
 
 export function CategoryPicker({ value, onChange }: { value: string | null; onChange: (slug: string) => void }) {
@@ -26,8 +27,13 @@ export function CategoryPicker({ value, onChange }: { value: string | null; onCh
               active && "border-white bg-white/[.06]"
             )}
           >
-            <span className="text-xl leading-none" aria-hidden>
-              {c.emoji}
+            <span
+              className={cn(
+                "grid size-7 shrink-0 place-items-center rounded-lg transition-colors",
+                active ? "bg-white text-[#101014]" : "bg-white/[.06] text-white"
+              )}
+            >
+              <CategoryIcon slug={c.slug} className="size-[18px]" />
             </span>
             <span className="truncate text-[12px] font-semibold">{c.name}</span>
           </button>

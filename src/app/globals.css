@@ -154,6 +154,10 @@
    */
   html {
     overflow-y: scroll;
+    /* эмбиент-слои плеера выходят за края вьюпорта (room-свет -right-[14vw]):
+       clip на корне гарантирует, что НИКОГДА не появится горизонтальный
+       скроллбар — свечение просто обрезается краем документа */
+    overflow-x: clip;
     scrollbar-gutter: stable;
   }
   body {
@@ -215,20 +219,19 @@
   -webkit-backdrop-filter: blur(20px);
 }
 /* Полупрозрачные structural-панели (сайдбар, чат, инфо-бар): чуть темнее
-   фона, сильный blur — эмбиент просачивается мягким «комнатным» светом.
-   Прозрачность — «слегка прозрачнее топбара» (топбар bg-background/70):
-   панели держат 0.64/0.60 — читаемо, но стекло живое */
+   фона, blur умеренный — эмбиент просачивается «комнатным» светом СКВОЗЬ
+   панели (light-стекло): альфы 0.55/0.45 — читаемо, но стекло живое */
 .glass-panel {
-  background: rgba(11, 11, 13, 0.64);
-  backdrop-filter: blur(28px) saturate(1.3);
-  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  background: rgba(11, 11, 13, 0.55);
+  backdrop-filter: blur(24px) saturate(1.25);
+  -webkit-backdrop-filter: blur(24px) saturate(1.25);
 }
 /* вариант с оконтовкой (для «плавающих» панелей над эмбиентом) */
 .glass-panel-bordered {
-  background: rgba(11, 11, 13, 0.6);
+  background: rgba(11, 11, 13, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(28px) saturate(1.3);
-  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  backdrop-filter: blur(22px) saturate(1.25);
+  -webkit-backdrop-filter: blur(22px) saturate(1.25);
 }
 
 /* ── Читаемость текста чата поверх яркого эмбиента ─────────────────────

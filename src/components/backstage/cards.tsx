@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { CategoryIcon } from "@/components/backstage/category-icon";
 import { SmartImage } from "@/components/backstage/smart-image";
 import type { ClipDto, PublicChannel, RecordingDto, ScheduleDto } from "@/lib/types";
 import { formatCount, formatDuration, formatUptime, formatWhen } from "@/components/backstage/hooks";
@@ -148,10 +149,17 @@ export function LiveChannelCard({ channel, hero = false }: { channel: PublicChan
             <span className="label-caps mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-white/70">
               <span className="text-white/90">{channel.name}</span>
               {channel.liveCategory && (
-                <span className="flex items-center gap-1 rounded-full bg-white/15 px-2 py-px backdrop-blur-sm">
+                <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-2 py-px backdrop-blur-sm">
                   {(() => {
                     const cat = findCategory(channel.liveCategory);
-                    return cat ? `${cat.emoji} ${cat.name}` : channel.liveCategory;
+                    return cat ? (
+                      <>
+                        <CategoryIcon slug={cat.slug} className="size-3 text-white" />
+                        <span className="truncate">{cat.name}</span>
+                      </>
+                    ) : (
+                      channel.liveCategory
+                    );
                   })()}
                 </span>
               )}

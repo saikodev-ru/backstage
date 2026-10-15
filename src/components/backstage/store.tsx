@@ -27,10 +27,13 @@ type AppState = {
   /** Демо-режим авторизации (консольная команда demo()): кнопки входа работают без Telegram + чекбоксы ролей */
   demoAuth: boolean;
 
-  setView: (v: View) => void;
-  openChannel: (slug: string) => void;
+  /** Навигация с записью в историю браузера: жест «назад»/кнопка назад
+      возвращает к предыдущему экрану (Twitch-мобайл). fromHistory —
+      восстановление при popstate/hashchange (без новой записи). */
+  setView: (v: View, opts?: { fromHistory?: boolean }) => void;
+  openChannel: (slug: string, opts?: { fromHistory?: boolean }) => void;
   /** Страница канала (баннер/аватар/описание) — как в Twitch */
-  openChannelPage: (slug: string) => void;
+  openChannelPage: (slug: string, opts?: { fromHistory?: boolean }) => void;
   setUser: (u: PublicUser | null) => void;
   setChannels: (c: PublicChannel[]) => void;
   patchChannel: (slug: string, patch: Partial<PublicChannel>) => void;
@@ -39,10 +42,18 @@ type AppState = {
   setDemoAuth: (b: boolean) => void;
 };
 
+/** URL экрана: эфир — #ch-<slug>, страница канала — #chp-<slug>, прочее — путь */
+function urlForView(view: View, slug: string | null): string {
+  if (view === "live" && slug) return `#ch-${slug}`;
+  if (view === "channel" && slug) return `#chp-${slug}`;
+  if (typeof window === "undefined") return "/";
+  return window.location.pathname;
+}
+
 function createBackstageStore(initial: { channels: PublicChannel[]; user: PublicUser | null }) {
   // STREAM-FIRST: при открытии сайта с активным эфиром сразу показываем трансляцию
   const liveSlug = initial.channels.find((c) => c.isLive)?.slug ?? null;
-  return createStore<AppState>()((set) => ({
+  return createStore<AppState>()((set, get) => ({
     view: liveSlug ? "live" : "home",
     activeChannel: liveSlug ?? initial.channels[0]?.slug ?? null,
     user: initial.user,
@@ -51,9 +62,30 @@ function createBackstageStore(initial: { channels: PublicChannel[]; user: Public
     adminOpen: false,
     demoAuth: false,
 
-    setView: (view) => set({ view }),
-    openChannel: (slug) => set({ view: "live", activeChannel: slug }),
-    openChannelPage: (slug) => set({ view: "channel", activeChannel: slug }),
+    setView: (view, opts) => {
+      set({ view });
+      if (!opts?.fromHistory && typeof window !== "undefined") {
+        const { activeChannel } = get();
+        const url = urlForView(view, activeChannel);
+        if (url !== window.location.hash || !url.startsWith("#")) {
+          // ...history.state — сохраняем приватные поля Next Router,
+          // иначе popstate в эту запись уйдёт в hard-reload
+          window.history.pushState({ ...window.history.state, bs: view, slug: activeChannel }, "", url);
+        }
+      }
+    },
+    openChannel: (slug, opts) => {
+      set({ view: "live", activeChannel: slug });
+      if (!opts?.fromHistory && typeof window !== "undefined") {
+        window.history.pushState({ ...window.history.state, bs: "live", slug }, "", `#ch-${slug}`);
+      }
+    },
+    openChannelPage: (slug, opts) => {
+      set({ view: "channel", activeChannel: slug });
+      if (!opts?.fromHistory && typeof window !== "undefined") {
+        window.history.pushState({ ...window.history.state, bs: "channel", slug }, "", `#chp-${slug}`);
+      }
+    },
     setUser: (user) => set({ user }),
     setChannels: (channels) => set({ channels }),
     patchChannel: (slug, patch) =>

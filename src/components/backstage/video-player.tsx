@@ -231,7 +231,7 @@ export function VideoPlayer({
         wctx.filter = "blur(10px) saturate(1.35) brightness(1.12)";
         wctx.drawImage(video, cx - dw / 2, cy - dh / 2, dw, dh);
         // второй, широкий слой — полусвет вокруг плеера (компактнее и мягче)
-        wctx.globalAlpha = 0.38;
+        wctx.globalAlpha = 0.45;
         wctx.drawImage(video, cx - dw * 0.78, cy - dh * 0.78, dw * 1.56, dh * 1.56);
         wctx.globalAlpha = 1;
         wctx.filter = "none";
@@ -239,9 +239,9 @@ export function VideoPlayer({
         const r = Math.hypot(Math.max(cx, ROOM_W - cx), Math.max(cy, ROOM_H - cy));
         if (r > 1) {
           wctx.globalCompositeOperation = "destination-in";
-          const g = wctx.createRadialGradient(cx, cy, r * 0.28, cx, cy, r);
+          const g = wctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r);
           g.addColorStop(0, "rgba(0,0,0,1)");
-          g.addColorStop(0.6, "rgba(0,0,0,0.55)");
+          g.addColorStop(0.66, "rgba(0,0,0,0.62)");
           g.addColorStop(1, "rgba(0,0,0,0)");
           wctx.fillStyle = g;
           wctx.fillRect(0, 0, ROOM_W, ROOM_H);
@@ -531,7 +531,7 @@ export function VideoPlayer({
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute -top-[18vh] -bottom-[24vh] -left-[10vw] -right-[14vw] -z-10",
+          "pointer-events-none absolute -top-[18vh] -bottom-[24vh] -left-[10vw] -right-[14vw] -z-10 lg:-left-[72px]",
           !ambientActive && "hidden"
         )}
       >
@@ -539,7 +539,7 @@ export function VideoPlayer({
           ref={roomRef}
           width={ROOM_W}
           height={ROOM_H}
-          className="block h-full w-full opacity-50"
+          className="block h-full w-full opacity-55"
         />
       </div>
 
@@ -547,11 +547,13 @@ export function VideoPlayer({
           -z-10 внутри isolate — всегда позади видео, но поверх room-слоя.
           NB: канвас — replaced-элемент и НЕ растягивается четырьмя
           inset-ами, поэтому растяжку делает обёртка-div (h-full w-full),
-          а фильтры запечены в битмапу. */}
+          а фильтры запечены в битмапу.
+          На lg ореол заходит на 72px влево — ровно под компактный рельс
+          сайдбара (glass + backdrop-blur подсвечивается изнутри). */}
       <div
         aria-hidden
         className={cn(
-          "pointer-events-none absolute -top-8 -bottom-24 -left-8 -right-16 -z-10",
+          "pointer-events-none absolute -top-8 -bottom-28 -left-8 -right-16 -z-10 lg:-left-[72px]",
           !ambientActive && "hidden"
         )}
       >
@@ -649,12 +651,21 @@ export function VideoPlayer({
         />
       )}
 
-      {/* «Включить звук» — автоплей стартует без звука (как в Twitch) */}
+      {/* «Включить звук» — автоплей стартует без звука (как в Twitch).
+          Полупрозрачная пилюля; прячется вместе с контролами, когда плеер
+          не в фокусе (ховер/фокус/пауза) — не висит на экране постоянно.
+          Клик по зоне пилюли работает и «сквозь» прозрачность — как в YouTube. */}
       {!locked && src && muted && status === "ready" && (
         <button
           type="button"
           onClick={toggleMute}
-          className="glass-strong label-caps absolute bottom-16 left-3 z-20 flex items-center gap-2 rounded-full px-3.5 py-2 text-[11px] text-foreground transition-transform hover:scale-[1.03] sm:bottom-[4.5rem]"
+          aria-label="Включить звук"
+          className={cn(
+            "label-caps absolute bottom-16 left-3 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/55 px-3.5 py-2 text-[11px] text-white backdrop-blur-md transition-opacity duration-200 hover:bg-black/70 sm:bottom-[4.5rem]",
+            playing
+              ? "opacity-0 group-hover/player:opacity-100 group-focus-within/player:opacity-100"
+              : "opacity-100"
+          )}
         >
           <VolumeX className="size-4" />
           ВКЛЮЧИТЬ ЗВУК
@@ -692,7 +703,9 @@ export function VideoPlayer({
               </button>
             )}
 
-            {/* Громкость: нативный range, стили .player-volume (глобальные) */}
+            {/* Громкость: нативный range, стили .player-volume (глобальные).
+                Слайдер — только от sm: на телефонах громкостью управляет ОС
+                (как в Twitch-мобиле), остаётся кнопка mute/unmute */}
             <div className="group/vol flex items-center gap-1">
               <button
                 onClick={toggleMute}
@@ -709,7 +722,7 @@ export function VideoPlayer({
                 value={muted ? 0 : volume}
                 onChange={(e) => onVolumeInput(parseFloat(e.target.value))}
                 aria-label="Громкость"
-                className="player-volume w-14 transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:w-20 sm:group-hover/vol:w-28"
+                className="player-volume hidden w-14 transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:block sm:w-20 sm:group-hover/vol:w-28"
                 style={{ "--vol": `${volPct}%` } as React.CSSProperties}
               />
             </div>

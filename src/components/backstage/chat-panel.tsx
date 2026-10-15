@@ -1,14 +1,16 @@
 "use client";
 
-// Чат трансляции v5 «TWITCH 1:1»: строки «[бейджи] Имя: текст» без аватарок,
+// Чат трансляции v5.1 «TWITCH 1:1»: строки «[бейджи] Имя: текст» без аватарок,
 // хедер «ЧАТ ТРАНСЛЯЦИИ» по центру + eye-кнопка «кто в чате» (слева от collapse),
 // ПКМ-меню модерации (отстранить/забанить/удалить/закрепить), баннер закреплённого
 // сообщения, настройки чата (шестерёнка: цвет ника из палитры Twitch, размер
 // текста, время сообщений), ввод: Enter на десктопе / компактная кнопка на мобиле.
+// v5.1: onCollapse — шеврон сворачивания в хедере (мобильная раскладка эфира).
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { io, type Socket } from "socket.io-client";
 import {
+  ChevronDown,
   Gem,
   Lock,
   Pin,
@@ -451,7 +453,16 @@ function ChatSettingsMenu({ settings }: { settings: ChatSettings }) {
   );
 }
 
-export function ChatPanel({ channelSlug, className }: { channelSlug: string; className?: string }) {
+export function ChatPanel({
+  channelSlug,
+  className,
+  onCollapse,
+}: {
+  channelSlug: string;
+  className?: string;
+  /** Мобильная раскладка: шеврон «свернуть» в хедере чата */
+  onCollapse?: () => void;
+}) {
   const user = useBackstageStore((s) => s.user);
   const setAuthOpen = useBackstageStore((s) => s.setAuthOpen);
   const channel = useBackstageStore((s) => s.channels.find((c) => c.slug === channelSlug));
@@ -669,19 +680,31 @@ export function ChatPanel({ channelSlug, className }: { channelSlug: string; cla
         <h2 className="label-caps absolute left-1/2 -translate-x-1/2 text-[11px] tracking-wide text-muted-foreground">
           ЧАТ ТРАНСЛЯЦИИ
         </h2>
-        <button
-          onClick={() => setChattersOpen((v) => !v)}
-          aria-label="Кто сейчас в чате"
-          aria-pressed={chattersOpen}
-          title="Кто сейчас в чате"
-          className={cn(
-            "flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[12px] font-bold transition-colors md:mr-10",
-            chattersOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+        <span className="flex shrink-0 items-center gap-1 md:mr-10">
+          <button
+            onClick={() => setChattersOpen((v) => !v)}
+            aria-label="Кто сейчас в чате"
+            aria-pressed={chattersOpen}
+            title="Кто сейчас в чате"
+            className={cn(
+              "flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[12px] font-bold transition-colors",
+              chattersOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <ViewersIcon className="size-4" />
+            {chatters.length > 0 ? chatters.length : viewers}
+          </button>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              aria-label="Свернуть чат"
+              title="Свернуть чат"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-white/10 hover:text-foreground"
+            >
+              <ChevronDown className="size-4" />
+            </button>
           )}
-        >
-          <ViewersIcon className="size-4" />
-          {chatters.length > 0 ? chatters.length : viewers}
-        </button>
+        </span>
       </header>
 
       {/* Закреплённое сообщение (закреплено модером через ПКМ) */}

@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { CategoryIcon } from "@/components/backstage/category-icon";
 import { ViewersIcon } from "@/components/backstage/icons";
 import { useBackstageStore } from "@/components/backstage/store";
 import { useContent, formatCount, formatWhen } from "@/components/backstage/hooks";
@@ -198,8 +199,8 @@ export function ChannelView() {
               </span>
               <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                 {channel.liveCategory && (
-                  <span className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-0.5 font-semibold text-foreground/80">
-                    {category && <span aria-hidden>{category.emoji}</span>}
+                  <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-0.5 font-semibold text-foreground/80">
+                    {category && <CategoryIcon slug={category.slug} className="size-3.5 text-white" />}
                     {category?.name ?? channel.liveCategory}
                   </span>
                 )}

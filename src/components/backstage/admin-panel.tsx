@@ -487,9 +487,10 @@ export function AdminPanel() {
   return (
     <Dialog open={adminOpen} onOpenChange={setAdminOpen}>
       <DialogContent className="max-h-[90vh] gap-0 overflow-y-auto border-border bg-card p-0 sm:max-w-3xl lg:max-w-4xl">
-        {/* Шапка */}
+        {/* Шапка: строка заголовка с резервом справа (pr-12) — бейджи статусов
+            никогда не налезают на кнопку-крестик (absolute top-4 right-4) */}
         <DialogHeader className="space-y-2 border-b border-white/[.06] p-5 pb-4 sm:p-6 sm:pb-4">
-          <DialogTitle className="headline flex flex-wrap items-center gap-2.5 text-base sm:text-lg">
+          <DialogTitle className="headline flex flex-wrap items-center gap-2.5 pr-12 text-base sm:text-lg">
             <Radio className="size-5 text-live" aria-hidden />
             УПРАВЛЕНИЕ ЭФИРОМ
             {engineState && (

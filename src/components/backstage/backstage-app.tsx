@@ -3,7 +3,7 @@
 // Корневой клиентский компонент «Бэкстейдж» v2 «GLASS ARENA»:
 // провайдер стора + shell + view-роутинг + live-тикер.
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { BackstageProvider, useBackstageStore } from "@/components/backstage/store";
 import { useChannels, formatCount } from "@/components/backstage/hooks";
 import { TopBar } from "@/components/backstage/top-bar";
@@ -19,6 +19,7 @@ import { ChannelView } from "@/components/backstage/views/channel-view";
 import { AuthDialog } from "@/components/backstage/auth-dialog";
 import { AdminPanel } from "@/components/backstage/admin-panel";
 import { HostOnboarding, DEMO_ONBOARDING_EVENT } from "@/components/backstage/host-onboarding";
+import { cn } from "@/lib/utils";
 import type { PublicChannel, PublicUser } from "@/lib/types";
 
 // Консольная команда демо-режима (объявляем тип)
@@ -121,44 +122,60 @@ function LiveTicker({ channel }: { channel: PublicChannel }) {
 }
 
 function Shell() {
-  const { view, activeChannel, openChannel, openChannelPage, channels } = useBackstageStore();
+  const { view, activeChannel, openChannel, openChannelPage, setView, channels } = useBackstageStore();
   useChannels(); // polling каналов + конфиг авторизации
   useDemoModeBridge(); // консольная команда demo()
 
-  // Hash-роутинг: #ch-<slug> (эфир), #chp-<slug> (страница канала) — шаринг ссылок
+  // Хеш-роутинг + история: #ch-<slug> (эфир), #chp-<slug> (страница канала).
+  // Пользовательская навигация ПУШИТ записи (store-экшены) — жест «назад»/
+  // кнопка назад возвращает к предыдущему экрану; popstate/hashchange
+  // восстанавливают состояние БЕЗ новой записи (fromHistory).
+  const firstNavRun = useRef(true);
   useEffect(() => {
-    const applyHash = () => {
-      const mLive = window.location.hash.match(/^#ch-([a-z0-9-]+)$/i);
-      const mPage = window.location.hash.match(/^#chp-([a-z0-9-]+)$/i);
-      if (mLive) {
-        const slug = mLive[1];
-        if (channels.some((c) => c.slug === slug)) openChannel(slug);
-      } else if (mPage) {
-        const slug = mPage[1];
-        if (channels.some((c) => c.slug === slug)) openChannelPage(slug);
+    const applyHash = (raw: string) => {
+      const mLive = raw.match(/^#ch-([a-z0-9-]+)$/i);
+      const mPage = raw.match(/^#chp-([a-z0-9-]+)$/i);
+      if (mLive && channels.some((c) => c.slug === mLive[1])) {
+        openChannel(mLive[1], { fromHistory: true });
+      } else if (mPage && channels.some((c) => c.slug === mPage[1])) {
+        openChannelPage(mPage[1], { fromHistory: true });
+      } else if (!raw) {
+        setView("home", { fromHistory: true });
       }
     };
-    applyHash();
-    window.addEventListener("hashchange", applyHash);
-    return () => window.removeEventListener("hashchange", applyHash);
-  }, [channels, openChannel, openChannelPage]);
 
-  // Поддержка адресной строки при переключении каналов
-  useEffect(() => {
-    if (view === "live" && activeChannel) {
-      const hash = `#ch-${activeChannel}`;
-      if (window.location.hash !== hash) {
-        window.history.replaceState(null, "", hash);
-      }
-    } else if (view === "channel" && activeChannel) {
-      const hash = `#chp-${activeChannel}`;
-      if (window.location.hash !== hash) {
-        window.history.replaceState(null, "", hash);
-      }
-    } else if (window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname);
+    // глубокая ссылка на старте — применяем один раз (пустой хеш НЕ
+    // трогаем: стартовый экран выбирает стрим-фёрст-логика стора)
+    if (firstNavRun.current) {
+      firstNavRun.current = false;
+      if (window.location.hash) applyHash(window.location.hash);
     }
-  }, [view, activeChannel]);
+
+    const onNav = () => applyHash(window.location.hash);
+    window.addEventListener("popstate", onNav);
+    window.addEventListener("hashchange", onNav);
+    return () => {
+      window.removeEventListener("popstate", onNav);
+      window.removeEventListener("hashchange", onNav);
+    };
+  }, [channels, openChannel, openChannelPage, setView]);
+
+  // Стартовая нормализация записи истории: закрепляем URL за стартовым
+  // экраном (стрим-фёрст без хеша → #ch-<slug>), чтобы «назад» из других
+  // разделов возвращался на эфир, а не покидал сайт
+  const didNormalize = useRef(false);
+  useEffect(() => {
+    if (didNormalize.current) return;
+    didNormalize.current = true;
+    if (window.location.hash) return; // глубокая ссылка — уже корректна
+    if (view === "live" && activeChannel) {
+      window.history.replaceState({ ...window.history.state, bs: "live", slug: activeChannel }, "", `#ch-${activeChannel}`);
+    } else if (view === "channel" && activeChannel) {
+      window.history.replaceState({ ...window.history.state, bs: "channel", slug: activeChannel }, "", `#chp-${activeChannel}`);
+    } else {
+      window.history.replaceState({ ...window.history.state, bs: view }, "", window.location.pathname);
+    }
+  }, []);
 
   const liveChannel = channels.find((c) => c.isLive);
   const showTicker = Boolean(liveChannel && view !== "live");
@@ -172,7 +189,12 @@ function Shell() {
       {showTicker && liveChannel && <LiveTicker channel={liveChannel} />}
       <div className="flex flex-1">
         <LeftRail />
-        <main className="view-in min-w-0 flex-1 pb-[92px] lg:pb-0" id="content" key={view}>
+        {/* На экране эфира (мобайл) нижний док скрыт — отступ под него не нужен */}
+        <main
+          key={view}
+          id="content"
+          className={cn("view-in min-w-0 flex-1 lg:pb-0", view === "live" ? "pb-0" : "pb-[92px]")}
+        >
           {view === "home" && <HomeView />}
           {view === "live" && <LiveView />}
           {view === "clips" && <ClipsView />}

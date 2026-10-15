@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { findCategory } from "@/lib/categories";
+import { CategoryIcon } from "@/components/backstage/category-icon";
 import { useBackstageStore, type View } from "@/components/backstage/store";
 import { toast } from "@/hooks/use-toast";
 import type { PublicChannel } from "@/lib/types";
@@ -277,7 +278,14 @@ function ChannelCard({ channel }: { channel: PublicChannel }) {
                 <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground/70">
                   {(() => {
                     const cat = findCategory(channel.liveCategory);
-                    return cat ? `${cat.emoji} ${cat.name}` : (channel.liveCategory ?? "—");
+                    return cat ? (
+                      <>
+                        <CategoryIcon slug={cat.slug} className="size-3 text-white/80" />
+                        <span className="truncate">{cat.name}</span>
+                      </>
+                    ) : (
+                      (channel.liveCategory ?? "—")
+                    );
                   })()}
                 </span>
                 <LiveViewers viewers={channel.viewers} className="text-[11px] leading-none" />
@@ -317,7 +325,7 @@ export function LeftRail() {
         role="navigation"
         aria-label="Основная навигация"
         className={cn(
-          "glass-panel sticky top-16 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 transition-[width] duration-200 ease-out lg:flex",
+          "glass-panel sticky top-16 z-10 hidden h-[calc(100vh-4rem)] shrink-0 flex-col overflow-hidden border-r border-white/5 transition-[width] duration-200 ease-out lg:flex",
           compact ? "w-[72px]" : "w-[264px]",
         )}
       >
@@ -447,11 +455,16 @@ export function MobileNav() {
   const { go, liveCount } = useNavActions();
   const view = useBackstageStore((s) => s.view);
 
+  // Twitch-мобайл: на экране эфира нижний док скрыт — весь экран отдан
+  // плееру и чату; навигация возвращается при выходе из эфира
+  // (жест «назад», тикер или топбар)
+  if (view === "live") return null;
+
   return (
     <nav
       role="navigation"
       aria-label="Мобильная навигация"
-      className="fixed inset-x-3 bottom-3 z-40 lg:hidden"
+      className="fixed inset-x-3 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] z-40 lg:hidden"
       style={{ WebkitTapHighlightColor: "transparent" }}
     >
       <div className="glass-strong flex items-stretch justify-around rounded-3xl p-1.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.8)]">
