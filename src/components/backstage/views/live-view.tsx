@@ -19,7 +19,6 @@ import {
   Copy,
   Crown,
   ExternalLink,
-  Heart,
   Image as ImageIcon,
   Lock,
   MessageSquare,
@@ -551,7 +550,7 @@ export function AboutSection({ channel }: { channel: PublicChannel }) {
   const hasDescription = Boolean(channel.description);
 
   return (
-    <section aria-label="О канале" className="border-t border-white/5 px-3 py-5 sm:px-4">
+    <section aria-label="О канале" className="px-3 py-5 sm:px-4">
       <header className="mb-4 flex items-center gap-3">
         <h2 className="label-caps text-[13px]">
           О КАНАЛЕ <span className="text-muted-foreground">· {channel.name}</span>
@@ -671,9 +670,10 @@ export function LiveView() {
   const category = findCategory(channel.liveCategory);
   const viewCount = formatCount(Math.max(channel.viewers, 1));
 
-  // overflow-x-clip: эмбиент-ореол плеера выходит за его края — без обрезки
-  // на мобильных он распирал страницу по горизонтали. clip (не hidden) не
-  // создаёт скролл-контейнер — sticky-чат продолжает работать.
+  // overflow-x-clip: эмбиент-слои плеера (ореол + «комнатный» свет) выходят
+  // за его края — без обрезки на мобильных они распирали страницу по
+  // горизонтали. clip (не hidden) не создаёт скролл-контейнер — sticky-чат
+  // продолжает работать.
   return (
     <div className="flex min-h-[calc(100vh-4rem)] flex-col overflow-x-clip md:flex-row">
       {/* Левая часть: плеер вплотную к краям + инфо + «О канале» */}
@@ -827,7 +827,7 @@ export function LiveView() {
             <button
               type="button"
               onClick={() => openChannelPage(channel.slug)}
-              className="mt-0.5 text-sm font-bold text-foreground/90 transition-colors hover:text-foreground hover:underline"
+              className="mt-0.5 text-[13px] font-display font-semibold tracking-wide text-foreground/90 transition-colors hover:text-foreground hover:underline"
             >
               {channel.name}
             </button>
@@ -871,7 +871,7 @@ export function LiveView() {
                 <Button
                   onClick={() => setSubOpen(true)}
                   variant="secondary"
-                  className="glass label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px] text-foreground"
+                  className="glass label-caps font-display gap-1.5 rounded-full px-4 text-[11px] text-foreground"
                   title="Платная подписка активна — нажмите для управления"
                   aria-pressed
                 >
@@ -881,7 +881,7 @@ export function LiveView() {
               ) : (
                 <Button
                   onClick={() => setSubOpen(true)}
-                  className="btn-gradient glow-primary label-caps gap-1.5 rounded-full px-4 py-1.5 text-[11px]"
+                  className="btn-gradient glow-primary label-caps font-display gap-1.5 rounded-full px-4 text-[11px]"
                 >
                   <Star className="size-3.5" />
                   ПОДПИСАТЬСЯ
@@ -890,15 +890,16 @@ export function LiveView() {
 
               {/* Пилюля зрителей: счётчик + «плюс» — копирование ссылки на эфир
                   (как на YouTube: плюс открывает ссылку с кнопкой «Скопировать»);
-                  счётчик «дышит» — поп-анимация при каждом изменении (демо-онлайн) */}
+                  высота — под кнопку подписки (h-9), число меняется мгновенно,
+                  без анимации: шрифт — дисплейный Unbounded, цвет — ярче LIVE */}
               {channel.isLive ? (
-                <div className="flex items-stretch overflow-hidden rounded-full bg-white/[.08]">
+                <div className="flex h-9 items-stretch overflow-hidden rounded-full bg-white/[.08]">
                   <span
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 text-[12px] font-bold text-live"
+                    className="flex items-center gap-1.5 px-3.5 text-[12px] font-bold text-live-bright"
                     title="Сейчас смотрят"
                   >
                     <ViewersIcon className="size-4" />
-                    <span key={viewCount} className="viewer-pop inline-block tabular-nums">
+                    <span className="font-display inline-block font-semibold tabular-nums">
                       {viewCount}
                     </span>
                   </span>
@@ -908,7 +909,7 @@ export function LiveView() {
                         type="button"
                         aria-label="Поделиться ссылкой на эфир"
                         title="Скопировать ссылку на эфир"
-                        className="grid w-8 place-items-center border-l border-white/10 text-foreground/80 transition-colors hover:bg-white/10 hover:text-foreground"
+                        className="grid w-9 place-items-center border-l border-white/10 text-foreground/80 transition-colors hover:bg-white/10 hover:text-foreground"
                       >
                         <Plus className="size-4" />
                       </button>
@@ -935,23 +936,33 @@ export function LiveView() {
                   </Popover>
                 </div>
               ) : (
-                <span className="label-caps flex items-center rounded-full bg-white/[.06] px-3.5 py-1.5 text-[11px] text-muted-foreground">
+                <span className="label-caps flex h-9 items-center rounded-full bg-white/[.06] px-3.5 text-[11px] text-muted-foreground">
                   ОФЛАЙН
                 </span>
               )}
             </div>
 
-            {/* Поддержать канал: ссылка из настроек канала (donateLink) */}
+            {/* Поддержать канал: ссылка из настроек канала (donateLink).
+                Иконка — инлайн-SVG залитой «сердце» белым (currentColor +
+                text-white), подчёркивание при ховере — только на тексте
+                (group-hover:underline на спене), иконка остаётся чистой. */}
             {channel.donateLink && (
               <a
                 href={channel.donateLink}
                 target="_blank"
                 rel="noreferrer noopener"
                 title="Поддержать канал"
-                className="label-caps flex w-fit items-center gap-1.5 text-[11px] text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                className="label-caps group flex w-fit items-center gap-1.5 text-[11px] text-white underline-offset-4"
               >
-                ПОДДЕРЖАТЬ
-                <Heart className="size-3.5 fill-live text-live" aria-hidden />
+                <span className="group-hover:underline">ПОДДЕРЖАТЬ</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  aria-hidden
+                  className="size-3.5 shrink-0 text-white"
+                >
+                  <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                </svg>
               </a>
             )}
           </div>

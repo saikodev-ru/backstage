@@ -3,16 +3,16 @@
 // HLS-плеер «Бэкстейдж» v5 «ГРАФИТ»: кастомные контролы в стиле Twitch.
 // - громкость: нативный range со стилем .player-volume (не обрезается)
 // - качество: «Источник (1080p60) / 720p60 / 480p / 360p / Авто» (уровни HLS)
-// - эмбиент-свечение v2: ДВА слоя — ореол вокруг плеера + «комнатный» wash
-//   на весь вьюпорт (портал в body, z:-1) — светится ПОЗАДИ всех панелей
-//   (сайдбар/чат/инфо-бар), те полупрозрачные с backdrop-blur; выключается
-//   в шестерёнке
+// - эмбиент-свечение v3: ДВА слоя, оба — дети контейнера плеера (absolute,
+//   -z-10 в его isolate-контексте): ореол вплотную вокруг плеера + «комнатный»
+//   свет на расширенном vw/vh-боксе. При прокрутке канвасы едут вместе с
+//   плеером силами композитора — пикс-в-пиксель, без JS-позиционирования;
+//   выключается в шестерёнке
 // - PiP: кнопка «картинка в картинке» + клавиша i (как в YouTube)
 // - кнопка «Клип» (заглушка — тост)
 // Воспроизведение: hls.js (MSE) + нативный HLS для Safari.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { Level } from "hls.js";
 import type Hls from "hls.js";
 import {
@@ -54,9 +54,9 @@ const AMBIENT_KEY = "backstage:ambient";
 const AMBIENT_W = 256;
 const AMBIENT_H = 144;
 
-/** Буфер wash-канваса («комнатный» свет на весь вьюпорт): 160×90. */
-const WASH_W = 160;
-const WASH_H = 90;
+/** Буфер «комнатного» света (расширенный бокс вокруг плеера): 160×90. */
+const ROOM_W = 160;
+const ROOM_H = 90;
 
 type FpsLadder = { byHeight: Map<number, number>; sourceFps: number };
 
@@ -111,7 +111,7 @@ export function VideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const ambientRef = useRef<HTMLCanvasElement>(null);
-  const washRef = useRef<HTMLCanvasElement>(null);
+  const roomRef = useRef<HTMLCanvasElement>(null);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
@@ -149,13 +149,17 @@ export function VideoPlayer({
     });
   }, []);
 
-  // ── Эмбиент v2: два маленьких канваса (~2.5 раза в секунду).
+  // ── Эмбиент v3: два маленьких канваса (~2.5 раза в секунду), оба жёстко
+  //    прикреплены к контейнеру плеера (обёртки absolute, -z-10) — при
+  //    прокрутке двигаются вместе с плеером силами композитора, пикс-в-пиксель.
   // 1) ОРЕОЛ: размытый кадр вплотную вокруг плеера — размытие и затухание
   //    запекаются в битмапу, канвас растягивается CSS без фильтров.
-  // 2) WASH: «комнатный» свет на весь вьюпорт (портал в body, z:-1) —
-  //    кадр рисуется по реальной геометрии плеера и радиально гаснет к
-  //    краям. Полупрозрачные панели (glass-panel + backdrop-blur: сайдбар,
-  //    чат, инфо-бар) подсвечиваются эмбиентом изнутри.
+  // 2) ROOM: «комнатный» свет на расширенном vw/vh-боксе вокруг плеера —
+  //    кадр рисуется по центру канваса и радиально гаснет к краям.
+  //    Содержимое не зависит от геометрии: ни getBoundingClientRect, ни
+  //    слушателей скролла — бокс растягивается чистым CSS (ресайз — бесплатно).
+  //    Полупрозрачные панели (glass-panel + backdrop-blur: чат, инфо-бар)
+  //    подсвечиваются эмбиентом изнутри.
   // HLS у нас приходит через тот же домен (прокси /api/stream/hls) —
   // канвас не «портится», для нативного Safari-HLS ореол тоже работает.
   const ambientActive = ambient && !locked && Boolean(src) && status === "ready";
@@ -205,41 +209,34 @@ export function VideoPlayer({
       ctx.globalCompositeOperation = "source-over";
     };
 
-    // Wash: «комнатный» свет — кадр по реальной геометрии плеера
-    // (getBoundingClientRect → масштаб 160×90), второй проход ×1.9 мягким
-    // полупрозрачным слоем расширяет свечение, радиальный destination-in
-    // гасит его к краям вьюпорта — свет оказывается ПОЗАДИ всех панелей.
-    const drawWash = () => {
-      const c = washRef.current;
+    // Room: «комнатный» свет — кадр по центру канваса (центр бокса =
+    // центр плеера по построению), второй проход ×1.56 мягким полупрозрачным
+    // слоем расширяет свечение, радиальный destination-in гасит его к краям
+    // бокса. Геометрия не читается вовсе: при скролле бокс едет вместе с
+    // плеером, при ресайзе растягивается CSS — перерисовка не нужна.
+    const drawRoom = () => {
+      const c = roomRef.current;
       if (!c || video.readyState < 2) return;
       const wctx = c.getContext("2d");
       if (!wctx) return;
       wctx.globalCompositeOperation = "source-over";
       wctx.globalAlpha = 1;
-      wctx.clearRect(0, 0, WASH_W, WASH_H);
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      if (vw === 0 || vh === 0) return;
-      const rect = wrapRef.current?.getBoundingClientRect();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return;
-      const sx = WASH_W / vw;
-      const sy = WASH_H / vh;
-      const dx = rect.left * sx;
-      const dy = rect.top * sy;
-      const dw = rect.width * sx;
-      const dh = rect.height * sy;
+      wctx.clearRect(0, 0, ROOM_W, ROOM_H);
+      const cx = ROOM_W / 2;
+      const cy = ROOM_H / 2;
+      // номинальная зона плеера в центре канваса (~56% — доля плеера в боксе)
+      const dw = ROOM_W * 0.56;
+      const dh = ROOM_H * 0.56;
       try {
         wctx.filter = "blur(10px) saturate(1.35) brightness(1.12)";
-        wctx.drawImage(video, dx, dy, dw, dh);
+        wctx.drawImage(video, cx - dw / 2, cy - dh / 2, dw, dh);
         // второй, широкий слой — полусвет вокруг плеера (компактнее и мягче)
-        const cx = dx + dw / 2;
-        const cy = dy + dh / 2;
         wctx.globalAlpha = 0.38;
         wctx.drawImage(video, cx - dw * 0.78, cy - dh * 0.78, dw * 1.56, dh * 1.56);
         wctx.globalAlpha = 1;
         wctx.filter = "none";
-        // радиальное затухание: плато у плеера → прозрачно у краёв вьюпорта
-        const r = Math.hypot(Math.max(cx, WASH_W - cx), Math.max(cy, WASH_H - cy));
+        // радиальное затухание: плато у плеера → прозрачно у краёв бокса
+        const r = Math.hypot(Math.max(cx, ROOM_W - cx), Math.max(cy, ROOM_H - cy));
         if (r > 1) {
           wctx.globalCompositeOperation = "destination-in";
           const g = wctx.createRadialGradient(cx, cy, r * 0.28, cx, cy, r);
@@ -247,11 +244,11 @@ export function VideoPlayer({
           g.addColorStop(0.6, "rgba(0,0,0,0.55)");
           g.addColorStop(1, "rgba(0,0,0,0)");
           wctx.fillStyle = g;
-          wctx.fillRect(0, 0, WASH_W, WASH_H);
+          wctx.fillRect(0, 0, ROOM_W, ROOM_H);
           wctx.globalCompositeOperation = "source-over";
         }
       } catch {
-        /* кросс-доменное видео (нативный Safari) — wash не рисуем */
+        /* кросс-доменное видео (нативный Safari) — room не рисуем */
       }
     };
 
@@ -259,13 +256,14 @@ export function VideoPlayer({
       if (stopped) return;
       try {
         drawHalo();
-        drawWash();
+        drawRoom();
       } catch {
         /* кросс-доменное видео (нативный Safari) — ореол просто не рисуем */
       }
       timer = window.setTimeout(tick, 400);
     };
     tick();
+
     return () => {
       stopped = true;
       window.clearTimeout(timer);
@@ -524,27 +522,29 @@ export function VideoPlayer({
 
   return (
     <div className="relative isolate">
-      {/* Эмбиент v2, слой 1 — WASH: «комнатный» свет на весь вьюпорт.
-          Портал в body + z:-1 — красится ПОЗАДИ всего интерфейса (сайдбар,
-          чат, инфо-бар): полупрозрачные панели с backdrop-blur подсвечиваются
-          эмбиентом изнутри. Кадр рисуется по реальной геометрии плеера и
-          радиально гаснет к краям вьюпорта (запечено в битмапу 160×90).
-          В фулскрин не видно: полноэкранный слой перекрывает вьюпорт. */}
-      {ambientActive &&
-        typeof document === "object" &&
-        createPortal(
-          <canvas
-            ref={washRef}
-            width={WASH_W}
-            height={WASH_H}
-            aria-hidden
-            className="pointer-events-none fixed inset-0 z-[-1] block h-full w-full opacity-50"
-          />,
-          document.body
+      {/* Эмбиент v3, слой 1 — ROOM: «комнатный» свет на расширенном боксе,
+          жёстко прикреплённом к контейнеру плеера (absolute, vw/vh-инсеты,
+          -z-10 — позади видео и позади инфо-бара/чата). Растяжка — чистый CSS,
+          при прокрутке бокс едет вместе с плеером пикс-в-пиксель (композитор),
+          никакого JS-позиционирования. В фулскрин не видно: полноэкранный
+          слой перекрывает страницу. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute -top-[18vh] -bottom-[24vh] -left-[10vw] -right-[14vw] -z-10",
+          !ambientActive && "hidden"
         )}
+      >
+        <canvas
+          ref={roomRef}
+          width={ROOM_W}
+          height={ROOM_H}
+          className="block h-full w-full opacity-50"
+        />
+      </div>
 
-      {/* Эмбиент v2, слой 2 — ОРЕОЛ: размытый кадр вплотную вокруг плеера.
-          -z-10 внутри isolate — всегда позади видео, но поверх wash-слоя.
+      {/* Эмбиент v3, слой 2 — ОРЕОЛ: размытый кадр вплотную вокруг плеера.
+          -z-10 внутри isolate — всегда позади видео, но поверх room-слоя.
           NB: канвас — replaced-элемент и НЕ растягивается четырьмя
           inset-ами, поэтому растяжку делает обёртка-div (h-full w-full),
           а фильтры запечены в битмапу. */}
@@ -681,12 +681,12 @@ export function VideoPlayer({
             {isLive && (
               <button
                 onClick={seekToLive}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold text-white transition-colors hover:bg-white/15"
+                className="flex items-center gap-2.5 rounded-full px-3.5 py-2 font-display text-[13.5px] font-semibold text-white transition-colors hover:bg-white/15"
                 aria-label="Перейти к живому эфиру"
                 title={uptime ? `В эфире ${uptime}` : "В эфире"}
               >
-                <span className="size-1.5 rounded-full bg-live live-dot" aria-hidden />
-                <span className="font-mono tabular-nums tracking-tight">
+                <span className="size-2.5 rounded-full bg-live live-dot" aria-hidden />
+                <span className="tabular-nums">
                   {liveStartedAt ? (uptime ?? "LIVE") : "LIVE"}
                 </span>
               </button>

@@ -109,8 +109,9 @@ function Shell() {
   const liveChannel = channels.find((c) => c.isLive);
   const showTicker = Boolean(liveChannel && view !== "live");
 
-  // NB: bg у обёртки НЕ ставим (он на body) — иначе wash-канвас эмбиента
-  // (fixed, z:-1 в body) оказался бы под ним и не светился бы сквозь панели.
+  // NB: bg у обёртки НЕ ставим (он на body) — эмбиент-канвасы плеера
+  // (absolute, -z-10 в isolate-контексте контейнера плеера) светятся вокруг
+  // плеера и сквозь полупрозрачные панели; фон body задаёт «глубину» графита.
   return (
     <div className="flex min-h-screen flex-col text-foreground">
       <TopBar />
