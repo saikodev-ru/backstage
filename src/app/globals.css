@@ -390,8 +390,12 @@
     transform: translateY(0) scale(1);
   }
 }
+/* fill-mode backwards (не both!): после завершения анимации main получает
+   базовые стили (transform: none). С both на main навсегда оставалась
+   identity-матрица transform → main становился containing-block'ом для
+   fixed-потомков (ломает позиционирование fixed-слоёв внутри экранов). */
 .view-in {
-  animation: view-in 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation: view-in 0.34s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
 }
 
 /* бегущая строка тикера */
