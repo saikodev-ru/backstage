@@ -885,7 +885,9 @@ export function AdminPanel() {
                     <span className="label-caps shrink-0">ВХОД СЕЙЧАС:</span>
                     <span className="font-mono">
                       {ingest.width ?? "?"}×{ingest.height ?? "?"} · {ingest.framerate ?? "?"} fps ·{" "}
-                      {Math.round((ingest.videoBitrate ?? 0) / 1000)} kbps
+                      {(ingest.videoBitrate ?? 0) >= 1000
+                        ? `${((ingest.videoBitrate ?? 0) / 1000).toFixed(1)} Мбит/с`
+                        : `${ingest.videoBitrate ?? 0} kbps`}
                     </span>
                     {(ingest.height ?? 0) > 1080 && (
                       <span>
