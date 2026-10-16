@@ -422,6 +422,16 @@
   mask-image: linear-gradient(to bottom, transparent 0, black 28px);
 }
 
+/* оверлей чата OBS: скрытый скроллбар + мягкое растворение верха списка */
+.overlay-list {
+  mask-image: linear-gradient(to bottom, transparent 0, black 3rem);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.overlay-list::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Типографика BACKSTAGE ────────────────────────────────────────────── */
 
 /* дисплей Unbounded + капс — лого, герой, крупные заголовки */

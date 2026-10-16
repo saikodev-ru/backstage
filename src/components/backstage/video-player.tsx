@@ -58,7 +58,7 @@ const AMBIENT_H = 144;
 const ROOM_W = 160;
 const ROOM_H = 90;
 
-type FpsLadder = { byHeight: Map<number, number>; sourceFps: number };
+type FpsLadder = { byHeight: Map<number, number>; sourceFps: number; latencyLevel: number };
 
 /** FPS уровня из атрибутов манифеста (HLS FRAME-RATE, если объявлен). */
 function fpsOf(level: Level): number {
@@ -67,22 +67,57 @@ function fpsOf(level: Level): number {
   return Number.isFinite(fps) && fps > 0 ? Math.round(fps) : 0;
 }
 
-/** Публичная лестница транскодинга (fps по высоте кадра) — из движка. */
+/** Публичная лестница транскодинга (fps по высоте кадра) + уровень задержки — из движка. */
 async function fetchFpsLadder(): Promise<FpsLadder | null> {
   try {
-    const res = await fetch("/api/stream/variants", { cache: "no-store" });
+    const res = await fetch("/api/stream/variants", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2500),
+    });
     if (!res.ok) return null;
-    const d = (await res.json()) as { variants?: Array<{ height: number | null; framerate: number }> };
+    const d = (await res.json()) as {
+      variants?: Array<{ height: number | null; framerate: number }>;
+      latencyLevel?: number;
+    };
     const byHeight = new Map<number, number>();
     let sourceFps = 0;
     for (const v of d.variants ?? []) {
       if (v.height == null) sourceFps = v.framerate;
       else if (v.framerate > 0) byHeight.set(v.height, v.framerate);
     }
-    return { byHeight, sourceFps };
+    return {
+      byHeight,
+      sourceFps,
+      latencyLevel:
+        typeof d.latencyLevel === "number" ? Math.max(0, Math.min(4, Math.round(d.latencyLevel))) : 2,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Конфиг hls.js по уровню задержки движка (0–4). Чем ниже уровень, тем ближе
+ * к live-краю стартует плеер и тем короче буфер; при отставании — плавный
+ * догон лёгким ускорением (механика «Minimize latency» Owncast / Low
+ * Latency Twitch). liveMaxLatencyDurationCount обязан быть строго больше
+ * liveSyncDurationCount, иначе hls.js его игнорирует.
+ */
+function hlsConfigFor(latencyLevel: number) {
+  const low = latencyLevel <= 1;
+  const mid = latencyLevel === 2;
+  return {
+    lowLatencyMode: true,
+    enableWorker: true,
+    backBufferLength: 30,
+    // старт у live-края: 1 сегмент (низкая) / 2 (стандарт) / 3 (высокая)
+    liveSyncDurationCount: low ? 1 : mid ? 2 : 3,
+    // жёсткий потолок отставания от края (в сегментах)
+    liveMaxLatencyDurationCount: low ? 4 : mid ? 8 : 12,
+    // догоняем живой край со скоростью до ×1.5 при запасе сети
+    maxLiveSyncPlaybackRate: low ? 1.5 : mid ? 1.25 : 1,
+    maxBufferLength: low ? 12 : mid ? 16 : 20,
+  };
 }
 
 export function VideoPlayer({
@@ -320,12 +355,14 @@ export function VideoPlayer({
       const HlsCtor = mod.default;
       if (disposed || !video) return;
 
+      // Уровень задержки движка узнаём ДО конструирования плеера — от него
+      // зависит агрессивность конфига hls.js (внутри таймаут 2.5с, чтобы
+      // не подвешивать старт видео).
+      const ladder = await fetchFpsLadder();
+      if (disposed || !video) return;
+
       if (HlsCtor.isSupported()) {
-        const hls = new HlsCtor({
-          lowLatencyMode: true,
-          enableWorker: true,
-          backBufferLength: 30,
-        });
+        const hls = new HlsCtor(hlsConfigFor(ladder?.latencyLevel ?? 2));
         hlsRef.current = hls;
         hls.attachMedia(video);
         hls.loadSource(src);
@@ -345,11 +382,8 @@ export function VideoPlayer({
               const short = h ? `${h}p${fps >= 50 ? fps : ""}` : `${Math.round((l.bitrate ?? 0) / 1000)}k`;
               return { index: i, short, label: isTop && h ? `Источник (${short})` : short };
             });
-          setQualities(build(null));
-          void fetchFpsLadder().then((ladder) => {
-            if (disposed || !ladder) return;
-            setQualities(build(ladder));
-          });
+          // лестница fps уже получена до создания плеера — подписи сразу точные
+          setQualities(build(ladder));
           void video.play().catch(() => setPlaying(false));
         });
         hls.on(HlsCtor.Events.LEVEL_SWITCHED, (_e, data) => {

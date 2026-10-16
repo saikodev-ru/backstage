@@ -4,6 +4,7 @@
 // Широкий диалог с двумя категориями настроек:
 //   ОСНОВНЫЕ     — тип эфира (открытый/закрытый), название, категория, теги.
 //   РАСШИРЕННЫЕ  — качество трансляции (чекбоксы вариантов Owncast),
+//                  задержка эфира (пресеты как у Twitch/YouTube + живой вход),
 //                  подключение OBS (сервер + ключ, регенерация при утечке),
 //                  тестовый эфир и тестовый чат (только демо-режим).
 // Концепция: один инстанс — один ведущий канал (channels[0]).
@@ -28,6 +29,7 @@ import {
   Server,
   Sparkles,
   Square,
+  Zap,
 } from "lucide-react";
 import {
   Dialog,
@@ -47,6 +49,29 @@ import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { PublicChannel } from "@/lib/types";
 import type { OwncastVariant } from "@/lib/owncast-admin";
+
+/* ── Задержка эфира: пресеты latencyLevel движка (Twitch/YouTube-стиль) ── */
+
+const LATENCY_PRESETS: { level: number; label: string; hint: string; note: string }[] = [
+  {
+    level: 2,
+    label: "СТАНДАРТ",
+    hint: "~10 с · максимум стабильности",
+    note: "Сегменты 3 с, окно 10 сегментов. Обычный HLS-эфир (Twitch «Normal»).",
+  },
+  {
+    level: 1,
+    label: "НИЗКАЯ",
+    hint: "~6–8 с · баланс",
+    note: "Сегменты 2 с, окно 15. Идеально сочетается с ключевыми кадрами OBS = 2 с.",
+  },
+  {
+    level: 0,
+    label: "МИНИМАЛЬНАЯ",
+    hint: "~4–6 с · максимум скорости",
+    note: "Сегменты 1 с, окно 25. Выше нагрузка на сеть зрителей, возможны рывки (YouTube «Ultra-low»).",
+  },
+];
 
 /* ── Типы ─────────────────────────────────────────────────────────────── */
 
@@ -366,6 +391,81 @@ export function AdminPanel() {
       setQualityBusy(false);
     }
   }, [quality, loadQuality]);
+
+  /* ── Задержка эфира: уровень движка + живой ингест ── */
+  const [latency, setLatency] = useState<number | null>(null); // null = грузим
+  const [latencyBusy, setLatencyBusy] = useState(false);
+  const [ingest, setIngest] = useState<{
+    width: number | null;
+    height: number | null;
+    framerate: number | null;
+    videoBitrate: number | null;
+  } | null>(null);
+
+  const loadLatency = useCallback(async () => {
+    setLatency(null);
+    try {
+      const res = await fetch("/api/admin/stream-config", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as {
+        videoSettings?: { latencyLevel?: number } | null;
+        ingest?: {
+          width: number | null;
+          height: number | null;
+          framerate: number | null;
+          videoBitrate: number | null;
+        } | null;
+      };
+      setLatency(typeof d.videoSettings?.latencyLevel === "number" ? d.videoSettings.latencyLevel : 2);
+      setIngest(d.ingest ?? null);
+    } catch {
+      setLatency(2);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (adminOpen && tab === "advanced") void loadLatency();
+  }, [adminOpen, tab, loadLatency]);
+
+  const applyLatency = useCallback(
+    async (level: number) => {
+      if (latencyBusy) return;
+      setLatencyBusy(true);
+      try {
+        const res = await fetch("/api/admin/stream-config", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ action: "latency", value: level }),
+        });
+        const d = (await res.json()) as {
+          ok?: boolean;
+          message?: string;
+          restarted?: boolean;
+          needsEngineRestart?: boolean;
+        };
+        if (!res.ok || !d.ok) throw new Error(d.message ?? "Ошибка применения");
+        setLatency(level);
+        const preset = LATENCY_PRESETS.find((p) => p.level === level);
+        toast({
+          title: `Задержка: ${preset?.label.toLowerCase() ?? "уровень обновлён"}`,
+          description: d.needsEngineRestart
+            ? "Эфир идёт — режим вступит в силу со следующего эфира"
+            : d.restarted
+              ? "Движок перезапущен, режим активен"
+              : "Режим активен для следующего эфира",
+        });
+      } catch (e) {
+        toast({
+          title: "Не удалось применить задержку",
+          description: e instanceof Error ? e.message : "Ошибка",
+          variant: "destructive",
+        });
+      } finally {
+        setLatencyBusy(false);
+      }
+    },
+    [latencyBusy]
+  );
 
   /* ── Подключение: стрим-ключ (движок) ──────────────────────────── */
   const [streamKey, setStreamKey] = useState<string | null>(null);
@@ -760,7 +860,89 @@ export function AdminPanel() {
                 </div>
               </section>
 
-              {/* 2. Подключение */}
+              {/* 2. Задержка эфира */}
+              <section className="space-y-3 rounded-xl border border-white/[.06] bg-white/[.02] p-4 sm:p-5">
+                <header className="flex flex-wrap items-center gap-2.5">
+                  <Zap className="size-4.5 text-primary" aria-hidden />
+                  <h3 className="label-caps text-[13px]">ЗАДЕРЖКА ЭФИРА</h3>
+                  {latencyBusy && <Loader2 className="ml-auto size-4 animate-spin text-muted-foreground" aria-hidden />}
+                </header>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Режим доставки HLS зрителям — как «Low Latency» у Twitch и «Ultra-low» у YouTube.
+                  Плееры стартуют у live-края и плавно догоняют при отставании.
+                </p>
+
+                {/* Живой вход: реальный поток от OBS (ловим 1440p и прочие сюрпризы) */}
+                {ingest && (
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-[11px] leading-snug",
+                      (ingest.height ?? 0) > 1080
+                        ? "border-live/40 bg-live/10 text-live"
+                        : "border-white/[.08] bg-white/[.02] text-muted-foreground"
+                    )}
+                  >
+                    <span className="label-caps shrink-0">ВХОД СЕЙЧАС:</span>
+                    <span className="font-mono">
+                      {ingest.width ?? "?"}×{ingest.height ?? "?"} · {ingest.framerate ?? "?"} fps ·{" "}
+                      {Math.round((ingest.videoBitrate ?? 0) / 1000)} kbps
+                    </span>
+                    {(ingest.height ?? 0) > 1080 && (
+                      <span>
+                        выше 1080p — транскодер не успевает, задержка растёт! В OBS: Настройки → Видео →
+                        «Разрешение вывода (масштабированное)» = 1920×1080.
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {latency === null ? (
+                  <div className="grid h-16 place-items-center">
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" aria-label="Загружаем режим задержки" />
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Режим задержки эфира">
+                    {LATENCY_PRESETS.map((p) => {
+                      const active = latency === p.level;
+                      return (
+                        <label
+                          key={p.level}
+                          title={p.note}
+                          className={cn(
+                            "flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2.5 transition-colors",
+                            active ? "border-primary/40 bg-primary/[.06]" : "border-white/[.08] hover:border-white/20",
+                            latencyBusy && "opacity-60"
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name="latency-level"
+                            className="sr-only"
+                            checked={active}
+                            disabled={latencyBusy}
+                            onChange={() => void applyLatency(p.level)}
+                          />
+                          <span className="label-caps text-[12px]">{p.label}</span>
+                          <span className="text-[11px] text-muted-foreground">{p.hint}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {latency !== null && !LATENCY_PRESETS.some((p) => p.level === latency) && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Текущий уровень движка: {latency} (повышенная надёжность) — выберите пресет, чтобы снизить
+                    задержку.
+                  </p>
+                )}
+
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Применяется к следующему эфиру, текущий не прерывается. Для минимума задержки в OBS:
+                  разрешение вывода 1920×1080 + интервал ключевых кадров 2 с (Настройки → Вывод → Продвинутые).
+                </p>
+              </section>
+
+              {/* 3. Подключение */}
               <section className="space-y-4 rounded-xl border border-white/[.06] bg-white/[.02] p-4 sm:p-5">
                 <header className="flex items-center gap-2.5">
                   <Server className="size-4.5 text-primary" aria-hidden />
@@ -872,7 +1054,7 @@ export function AdminPanel() {
                 </div>
               </section>
 
-              {/* 3–4. Демо-инструменты (только демо-режим) */}
+              {/* 4. Демо-инструменты (только демо-режим) */}
               {demoAuth && (
                 <section className="space-y-3 rounded-xl border border-dashed border-primary/30 bg-primary/[.03] p-4 sm:p-5">
                   <header className="flex flex-wrap items-center gap-2.5">

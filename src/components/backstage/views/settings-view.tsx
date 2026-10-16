@@ -260,7 +260,7 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
     }
   };
 
-  const overlayUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/overlay?channel=${channel.slug}&XTransformPort=3003`;
+  const overlayUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/?overlay=chat&channel=${channel.slug}`;
 
   return (
     <div className="mx-auto max-w-3xl space-y-5 p-4 pb-16 sm:p-6">
@@ -378,9 +378,12 @@ function SettingsForm({ channel }: { channel: PublicChannel }) {
               <CopyButton value={overlayUrl} label="URL оверлея чата" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Прозрачный чат с эмодзи 7TV/BTTV/FFZ, бейджами и авто-скроллом. Параметр
+              Прозрачный чат с эмодзи 7TV/BTTV/FFZ и авто-скроллом, прижат к низу источника.
+              Рекомендуемый размер: ширина ~340, высота по сцене. Параметр
               <code className="mx-1 rounded bg-black/30 px-1 font-mono text-[10px]">&scale=1.5</code>
-              увеличит размер текста.
+              увеличит текст,
+              <code className="mx-1 rounded bg-black/30 px-1 font-mono text-[10px]">&limit=30</code>
+              — число строк.
             </p>
           </Field>
 

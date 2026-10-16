@@ -5,6 +5,8 @@
 // движке и меняются через Admin API (Basic-auth по паролю из env):
 //   GET  /api/admin/serverconfig                        → videoSettings + streamKeys
 //   POST /api/admin/config/video/streamoutputvariants   → { value: [...] }
+//   POST /api/admin/config/video/streamlatencylevel     → { value: 0..4 } (задержка)
+//   GET  /api/admin/status                              → broadcaster.streamDetails (живой ингест)
 //   POST /api/admin/config/streamkeys                   → { value: [{comment,key}] }
 // Изменения применяются к следующему эфиру (RTMP-пуш); смена стрим-ключа —
 // к новым RTMP-подключениям (активный эфир не рвётся).
@@ -191,5 +193,73 @@ export async function setOwncastVariants(
     return { ok: res.ok && json.success !== false, message: json.message ?? (res.ok ? "готово" : `HTTP ${res.status}`) };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "owncast недоступен" };
+  }
+}
+
+/* ── Задержка эфира (latencyLevel 0–4) + живой ингест ─────────────────── */
+
+/** Параметры входящего потока (чем OBS кормит движок прямо сейчас) */
+export type OwncastIngest = {
+  width: number | null;
+  height: number | null;
+  framerate: number | null;
+  videoBitrate: number | null;
+  videoCodec: string | null;
+  encoder: string | null;
+};
+
+/**
+ * Уровень задержки движка (0 — минимальная … 4 — максимальная надёжность).
+ * Управляет длиной HLS-сегментов (1–5 с) и размером окна плейлиста;
+ * применяется к СЛЕДУЮЩЕМУ эфиру — текущая трансляция не прерывается.
+ */
+export async function setOwncastLatencyLevel(
+  level: number,
+  baseUrl: string = OWNCast_BASE_URL
+): Promise<{ ok: boolean; message: string }> {
+  const value = Math.max(0, Math.min(4, Math.round(level)));
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/config/video/streamlatencylevel`, {
+      method: "POST",
+      headers: adminHeaders(),
+      body: JSON.stringify({ value }),
+      signal: AbortSignal.timeout(4000),
+    });
+    const json = (await res.json().catch(() => ({}))) as { message?: string; success?: boolean };
+    return {
+      ok: res.ok && json.success !== false,
+      message: json.message ?? (res.ok ? "готово" : `HTTP ${res.status}`),
+    };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "owncast недоступен" };
+  }
+}
+
+/** Текущий входящий поток (null — эфир не идёт / движок недоступен) */
+export async function getOwncastIngest(baseUrl: string = OWNCast_BASE_URL): Promise<OwncastIngest | null> {
+  try {
+    const res = await fetch(`${baseUrl}/api/admin/status`, {
+      headers: adminHeaders(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as {
+      broadcaster?: { streamDetails?: Record<string, unknown> } | null;
+    };
+    const d = json.broadcaster?.streamDetails;
+    if (!d) return null;
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    return {
+      width: num(d.width),
+      height: num(d.height),
+      framerate: num(d.framerate),
+      videoBitrate: num(d.videoBitrate),
+      videoCodec: str(d.videoCodec),
+      encoder: str(d.encoder),
+    };
+  } catch {
+    return null;
   }
 }
